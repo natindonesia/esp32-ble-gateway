@@ -1,5 +1,6 @@
 
-use anyhow::{Result};
+
+use anyhow::Result;
 use esp_idf_hal::gpio::PinDriver;
 use esp_idf_svc::hal::prelude::Peripherals;
 use esp_idf_svc::nvs::EspNvs;
@@ -86,7 +87,7 @@ fn main() -> Result<()> {
 
     // Start the LED
     let mut led_blue = PinDriver::output(peripherals.pins.gpio2)?;
-    led_blue.set_high();
+    let _ = led_blue.set_high();
 
 
     
@@ -105,10 +106,10 @@ fn main() -> Result<()> {
         let current_time = std::time::Instant::now();
         //go blinking red
         loop {
-            led_blue.set_low();
+            let _ = led_blue.set_low();
             // Wait...
             std::thread::sleep(std::time::Duration::from_millis(200));
-            led_blue.set_high();
+            let _ = led_blue.set_high();
             // Wait...
             std::thread::sleep(std::time::Duration::from_millis(200));
             // check if 5 seconds have passed
@@ -132,12 +133,12 @@ fn main() -> Result<()> {
     
 
     loop {
-        led_blue.set_low();
+        let _ = led_blue.set_low();
         // Wait...
         std::thread::sleep(std::time::Duration::from_secs(1));
 
 
-        led_blue.set_high();
+        let _ = led_blue.set_high();
         // Wait...
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
