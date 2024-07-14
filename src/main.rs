@@ -1,6 +1,9 @@
+use std::borrow::Borrow;
+
 use anyhow::{bail, Result};
 use esp_idf_hal::gpio::PinDriver;
 use esp_idf_svc::hal::prelude::Peripherals;
+use esp_idf_svc::nvs::EspNvs;
 use log::info;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 
@@ -10,6 +13,8 @@ use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::timer::EspTaskTimerService;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
+
+use uuid::Uuid;
 
 
 
@@ -37,7 +42,47 @@ fn main() -> Result<()> {
     let peripherals = Peripherals::take().unwrap();
     let sys_loop = EspSystemEventLoop::take()?;
     let timer_service = EspTaskTimerService::new()?;
-    let nvs = EspDefaultNvsPartition::take()?;
+    let nvs_partition = EspDefaultNvsPartition::take()?;
+
+
+    // get uuid or make one
+    let nvs_namespace = "main";
+    let mut nvs = match EspNvs::new(nvs_partition.clone(), nvs_namespace, true) {
+        Ok(nvs) => {
+            info!("Got namespace {:?} from default partition", nvs_namespace);
+            nvs
+        }
+        Err(e) => panic!("Could't get namespace {:?}", e),
+    };
+
+    let mut buffer_uuid = [0u8; 36];
+    let uuid = match nvs.get_str("uuid", &mut buffer_uuid) {
+        Ok(uuid) => {
+            info!("Got uuid from nvs: {:?}", uuid);
+            uuid
+        }
+        Err(e) => {
+            panic!("Couldn't get uuid from nvs: {:?}", e);
+        }
+    };
+
+    if uuid.is_none() {
+        let new_uuid = Uuid::new_v4();
+        let new_uuid_str = new_uuid.to_string();
+        info!("Generated new uuid: {:?}", new_uuid_str);
+        let res = nvs.set_str("uuid", new_uuid_str.as_str());
+        if res.is_err() {
+            panic!("Couldn't set uuid in nvs: {:?}", res);
+        }
+    }
+
+    let uuid = nvs.get_str("uuid", &mut buffer_uuid).unwrap().unwrap();
+    info!("Got uuid from nvs: {:?}", uuid);
+
+
+
+
+
 
     info!("Hello, world!");
 
@@ -46,10 +91,11 @@ fn main() -> Result<()> {
     led_blue.set_high();
 
 
+    
 
 
     let mut wifi = AsyncWifi::wrap(
-        EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))?,
+        EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs_partition))?,
         sys_loop,
         timer_service,
     )?;
