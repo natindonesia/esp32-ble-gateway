@@ -4,7 +4,7 @@ use anyhow::Result;
 use esp_idf_hal::gpio::PinDriver;
 use esp_idf_svc::hal::prelude::Peripherals;
 use esp_idf_svc::nvs::EspNvs;
-use log::info;
+use log::{error, info};
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 
 
@@ -51,32 +51,66 @@ fn main() -> Result<()> {
             info!("Got namespace {:?} from default partition", nvs_namespace);
             nvs
         }
-        Err(e) => panic!("Could't get namespace {:?}", e),
+        Err(e) => anyhow::bail!("Could't get namespace {:?}", e),
     };
 
-    let mut buffer_uuid = [0u8; 36];
-    let uuid = match nvs.get_str("uuid", &mut buffer_uuid) {
-        Ok(uuid) => {
-            info!("Got uuid from nvs: {:?}", uuid);
-            uuid
+    
+    const MAX_STR_LEN: usize = 128;
+    // check if uuid exists
+    let the_str_len = nvs.str_len("uuid").map_or(0, |v| {
+        info!("Got stored string length of {:?}", v);
+        let vv = v.unwrap_or(0);
+        if vv >= MAX_STR_LEN {
+            error!("Too long, trimming");
+            0
+        } else {
+            vv
         }
-        Err(e) => {
-            panic!("Couldn't get uuid from nvs: {:?}", e);
-        }
-    };
+    });
 
-    if uuid.is_none() {
+
+    
+
+    let uuid;
+    if the_str_len > 0 {
+
+        let mut buffer_uuid: [u8; MAX_STR_LEN] = [0; MAX_STR_LEN];
+        let uuid_option = match nvs.get_str("uuid", &mut buffer_uuid) {
+            Ok(uuid) => {
+                info!("Got uuid from NVS: {:?}", uuid);
+                uuid
+            }
+            Err(e) => {
+                anyhow::bail!("Couldn't get uuid from NVS: {:?}", e);
+            }
+        };
+        if uuid_option.is_none() {
+            anyhow::bail!("Couldn't get uuid from NVS");
+        }
+
+
+        let uuid_res = Uuid::parse_str(uuid_option.unwrap());
+        if uuid_res.is_err() {
+            anyhow::bail!("Couldn't parse uuid from NVS: {:?}", uuid_res);
+        }
+        uuid = uuid_res.unwrap();
+
+    }else{
+        info!("No uuid found in NVS");
         let new_uuid = Uuid::new_v4();
-        let new_uuid_str = new_uuid.to_string();
-        info!("Generated new uuid: {:?}", new_uuid_str);
+        let new_uuid_str = new_uuid.clone().to_string();
+        info!("Generated new uuid: {:?}", new_uuid_str.clone());
         let res = nvs.set_str("uuid", new_uuid_str.as_str());
         if res.is_err() {
-            panic!("Couldn't set uuid in nvs: {:?}", res);
+            anyhow::bail!("Couldn't set uuid in NVS: {:?}", res);
         }
+        uuid = new_uuid;
     }
+   
 
-    let uuid = nvs.get_str("uuid", &mut buffer_uuid).unwrap().unwrap();
-    info!("Got uuid from nvs: {:?}", uuid);
+    info!("------------------------------------");
+    info!("UUID: {:?}", uuid);
+    info!("------------------------------------");
 
 
 
