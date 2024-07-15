@@ -27,7 +27,7 @@ lazy_static! {
 pub fn patch_eventfd() {
     log::info!("Setting up eventfd...");
     let config = esp_vfs_eventfd_config_t {
-        max_fds: 1,
+        max_fds: 5,
         ..Default::default()
     };
     esp_nofail! { unsafe { esp_vfs_eventfd_register(&config) } }
