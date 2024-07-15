@@ -35,9 +35,9 @@ anyhow = "1.0.86"
 esp-idf-hal = "0.44.1"
 embedded-svc = "0.28.0"
 uuid = {version = "1.10.0", features = ["v4"]}
-tokio = {version = "1.38.0", features = ["time", "macros", "rt"]}
-async-tungstenite = {version = "0.26.2", features = ["tokio-runtime"] }
+async-tungstenite = {version = "0.26.2"}
 futures-util = "0.3.30"
+futures = "0.3.30"
 [build-dependencies]
 embuild = "0.32.0"
 toml-cfg = "0.2.0"
