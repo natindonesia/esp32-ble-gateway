@@ -9,9 +9,6 @@ use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::timer::EspTaskTimerService;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
-use futures_util::SinkExt;
-use futures_util::StreamExt;
-use uuid::Uuid;
 
 /// This configuration is picked up at compile time by `build.rs` from the
 /// file `cfg.toml`.
@@ -143,7 +140,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-async fn main_loop<T: esp_idf_hal::gpio::Pin>(mut led_blue: PinDriver<'_, T, Output>){
+async fn main_loop<T: esp_idf_hal::gpio::Pin>(led_blue: PinDriver<'_, T, Output>){
     
 
     let led_loop = led_loop(led_blue);
