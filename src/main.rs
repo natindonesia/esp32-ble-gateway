@@ -2,7 +2,7 @@
 
 
 use anyhow::Result;
-use esp_idf_hal::gpio::{Gpio2, Output, PinDriver};
+use esp_idf_hal::gpio::{Output, PinDriver};
 use esp_idf_svc::hal::prelude::Peripherals;
 use esp_idf_svc::nvs::EspNvs;
 use log::{error, info};
