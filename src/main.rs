@@ -37,8 +37,7 @@ fn main() -> Result<()> {
     esp_idf_svc::log::EspLogger::initialize_default();
     peripherals::patch_eventfd();
 
-    let peripherals_arc_mutx = peripherals::PERIPHERALS.clone();
-    let mut peripherals = peripherals_arc_mutx.lock();
+    
 
     let sys_loop = peripherals::SYS_LOOP.clone();
     let timer_service = peripherals::ESP_TASK_TIMER_SVR.clone();
@@ -110,10 +109,10 @@ fn main() -> Result<()> {
     let mut led_blue = peripherals::take_gpio2_output();
     let _ = led_blue.set_high();
 
-    let modem = unsafe { peripherals.modem.clone_unchecked() };
+    
 
     let mut wifi = AsyncWifi::wrap(
-        EspWifi::new(modem, sys_loop.clone(), Some(nvs_partition))?,
+        peripherals::create_esp_wifi(),
         sys_loop,
         timer_service,
     )?;
@@ -184,10 +183,10 @@ async fn websocket_loop() -> Result<()> {
 async fn led_loop<T: esp_idf_hal::gpio::Pin>(mut led_blue: PinDriver<'_, T, Output>) {
     loop {
         let _ = led_blue.set_low();
-        // Wait...
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         let _ = led_blue.set_high();
-        // Wait...
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 }
 
