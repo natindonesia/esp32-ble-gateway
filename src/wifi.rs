@@ -37,7 +37,7 @@ pub async fn app_wifi_loop(mut wifi: AsyncWifi<EspWifi<'static>>) -> Result<()> 
             // }
 
             if fail_count > 0 {
-                info!("Network failure detected, try re-connecting...");
+                warn!("Network failure detected, try re-connecting...");
                 wifi.disconnect().await?;
                 wifi.stop().await?;
                 initial_wifi_connect(&mut wifi).await?;

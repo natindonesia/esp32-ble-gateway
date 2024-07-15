@@ -12,6 +12,8 @@ harness = false # do not use the built in cargo test harness -> resolve rust-ana
 
 [profile.release]
 opt-level = "s"
+lto = true
+
 
 [profile.dev]
 debug = true    # Symbols are nice and they don't increase the size on Flash
@@ -35,7 +37,7 @@ anyhow = "1.0.86"
 esp-idf-hal = "0.44.1"
 embedded-svc = "0.28.0"
 uuid = {version = "1.10.0", features = ["v4"]}
-async-tungstenite = {version = "0.26.2", features = ["tokio-runtime"]}
+async-tungstenite = {version = "0.26.2", features = ["tokio-runtime", "tokio-rustls-native-certs"]}
 futures-util = "0.3.30"
 tokio = { version = "*", features = ["rt", "net", "io-util", "time", "sync", "macros"] }
 parking_lot = "0.12.3"
