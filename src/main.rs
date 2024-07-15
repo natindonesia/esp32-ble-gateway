@@ -3,14 +3,11 @@ use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 use esp_idf_hal::gpio::{Output, PinDriver};
 
 use esp_idf_hal::peripheral::Peripheral;
-use esp_idf_svc::hal::prelude::Peripherals;
 use esp_idf_svc::nvs::EspNvs;
 use log::{error, info};
 
 use esp_idf_svc::hal::task::block_on;
-use esp_idf_svc::timer::EspTaskTimerService;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
-use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
 use futures_util::{SinkExt, StreamExt};
 use uuid::Uuid;
 mod peripherals;
