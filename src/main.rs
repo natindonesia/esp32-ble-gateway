@@ -1,4 +1,5 @@
 use anyhow::Result;
+use edge_executor::LocalExecutor;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 use esp_idf_hal::gpio::{Output, PinDriver};
 use esp_idf_svc::hal::prelude::Peripherals;
@@ -137,8 +138,9 @@ fn main() -> Result<()> {
 
     info!("Wifi DHCP info: {:?}", ip_info);
 
+    
 
-    let _ = futures::executor::block_on(main_loop(led_blue));
+    let _ = edge_executor::block_on(main_loop(led_blue));
     Ok(())
 }
 
