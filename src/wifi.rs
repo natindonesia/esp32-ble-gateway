@@ -38,9 +38,24 @@ pub async fn app_wifi_loop(mut wifi: AsyncWifi<EspWifi<'static>>) -> Result<()> 
 
             if fail_count > 0 {
                 warn!("Network failure detected, try re-connecting...");
-                wifi.disconnect().await?;
-                wifi.stop().await?;
-                initial_wifi_connect(&mut wifi).await?;
+                let res = wifi.disconnect().await;
+                if let Err(e) = res {
+                    error!("wifi.disconnect: {}", e);
+                    continue;
+                }
+                let res = wifi.stop().await;
+                if let Err(e) = res {
+                    error!("wifi.stop: {}", e);
+                    continue;
+                }
+                
+                let res = initial_wifi_connect(&mut wifi).await;
+                if let Err(e) = res {
+                    error!("initial_wifi_connect: {}", e);
+                    fail_count += 1;
+                } else {
+                    fail_count = 0;
+                }
                 info!("Connected to Wi-fi, now trying setting time from ntp.");
                 ntp_sync()?;
             }
