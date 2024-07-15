@@ -1,19 +1,9 @@
 
 use crate::ntp::ntp_sync;
-use crate::peripherals::{take_gpio12_output, take_gpio13_output};
 use crate::preludes::*;
-use esp_idf_hal::delay::FreeRtos;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use esp_idf_sys::{
-    esp_wifi_clear_ap_list, wifi_prov_event_handler_t, wifi_prov_mgr_config_t,
-    wifi_prov_mgr_deinit, wifi_prov_mgr_init, wifi_prov_mgr_is_provisioned,
-    wifi_prov_mgr_start_provisioning, wifi_prov_mgr_wait, wifi_prov_scheme_ble,
-    wifi_prov_security_WIFI_PROV_SECURITY_1,
-};
-use std::{
-    ffi::{c_void, CString},
-    ptr::null_mut,
-    thread,
+    esp_wifi_clear_ap_list,
 };
 use tokio::time::sleep;
 

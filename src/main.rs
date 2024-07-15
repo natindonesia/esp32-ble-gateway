@@ -2,7 +2,6 @@ use anyhow::Result;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 use esp_idf_hal::gpio::{Output, PinDriver};
 
-use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_svc::nvs::EspNvs;
 use log::{error, info};
 
