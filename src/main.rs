@@ -15,6 +15,7 @@ mod ntp;
 mod peripherals;
 mod preludes;
 mod wifi;
+mod rpc;
 
 /// This configuration is picked up at compile time by `build.rs` from the
 /// file `cfg.toml`.
@@ -212,6 +213,7 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
     // listen for response
     let mut buf = [0; 1024];
 
+    info!("Waiting for response from TCP server");
     loop {
         let n_res = stream.read(&mut buf).await;
         if let Err(e) = n_res {
@@ -230,14 +232,16 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
         let try_as_string = s.unwrap().trim().to_string();
 
         info!("Got response from TCP server: {:?}", try_as_string);
-        if try_as_string == "exit" {
-            break;
-        }else if try_as_string == "ping" {
-            let _ = stream.write_all(b"pong").await;
-        }else{
-            let _ = stream.write_all(b"echo: ").await;
-            let _ = stream.write_all(try_as_string.as_bytes()).await;
         
+        let res = rpc::handle_rpc(&try_as_string).await;
+        if let Err(e) = res {
+            let message = format!("Failed to handle rpc: {:?}", e);
+            let _ = stream.write_all(message.as_bytes()).await;
+            error!("{}", message);
+        }else{
+            let message = res.unwrap();
+            let _ = stream.write_all(message.as_bytes()).await;
+            info!("Sent response to TCP server: {:?}", message);
         }
     }
     Ok(())
