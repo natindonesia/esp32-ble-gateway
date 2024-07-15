@@ -124,12 +124,13 @@ fn main() -> Result<()> {
         let current_time = std::time::Instant::now();
         //go blinking red
         loop {
+            const WAIT: std::time::Duration = std::time::Duration::from_millis(150);
             let _ = led_blue.set_low();
             // Wait...
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            std::thread::sleep(WAIT);
             let _ = led_blue.set_high();
             // Wait...
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            std::thread::sleep(WAIT);
             // check if 5 seconds have passed
             if current_time.elapsed().as_secs() >= 5 {
                 break;
