@@ -9,6 +9,8 @@ use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::timer::EspTaskTimerService;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition};
+use futures_util::StreamExt;
+use uuid::Uuid;
 
 /// This configuration is picked up at compile time by `build.rs` from the
 /// file `cfg.toml`.
