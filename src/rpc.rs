@@ -17,19 +17,32 @@ pub struct RpcResponse {
 }
 
 
-async fn add(params: &Map<String, serde_json::Value>) -> Result<serde_json::Value, String> {
-    let a = params.get("a").unwrap().as_i64().unwrap();
-    let b = params.get("b").unwrap().as_i64().unwrap();
-    Ok(serde_json::Value::Number(serde_json::Number::from(a + b)))
+use serde_json::{ Value, Number};
+use std::result::Result;
+
+async fn add(params: &Map<String, Value>) -> Result<Value, String> {
+    let a = match params.get("a").and_then(|v| v.as_i64()) {
+        Some(num) => num,
+        None => return Err("Parameter 'a' is missing or not an integer".to_string()),
+    };
+    let b = match params.get("b").and_then(|v| v.as_i64()) {
+        Some(num) => num,
+        None => return Err("Parameter 'b' is missing or not an integer".to_string()),
+    };
+    Ok(Value::Number(Number::from(a + b)))
 }
 
-async fn sub(params: &Map<String, serde_json::Value>) -> Result<serde_json::Value, String> {
-    let a = params.get("a").unwrap().as_i64().unwrap();
-    let b = params.get("b").unwrap().as_i64().unwrap();
-    Ok(serde_json::Value::Number(serde_json::Number::from(a - b)))
+async fn sub(params: &Map<String, Value>) -> Result<Value, String> {
+    let a = match params.get("a").and_then(|v| v.as_i64()) {
+        Some(num) => num,
+        None => return Err("Parameter 'a' is missing or not an integer".to_string()),
+    };
+    let b = match params.get("b").and_then(|v| v.as_i64()) {
+        Some(num) => num,
+        None => return Err("Parameter 'b' is missing or not an integer".to_string()),
+    };
+    Ok(Value::Number(Number::from(a - b)))
 }
-
-
 
 pub async fn handle_rpc(
     payload: &str,
