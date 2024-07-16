@@ -1,11 +1,9 @@
-use std::ffi::CStr;
 use std::sync::Mutex;
 
 use anyhow::Result;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 use esp_idf_hal::gpio::{Output, PinDriver};
 
-use esp_idf_svc::eventloop::{EspEvent, EspEventDeserializer, EspEventPostData, EspEventSerializer, EspEventSource};
 use esp_idf_svc::nvs::EspNvs;
 use lazy_static::lazy_static;
 use log::{error, info};
