@@ -1,3 +1,4 @@
+use esp32_nimble::BLEDevice;
 use tokio::net::TcpStream;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map};
@@ -44,8 +45,25 @@ async fn sub(params: &Map<String, Value>) -> Result<Value, String> {
     Ok(Value::Number(Number::from(a - b)))
 }
  
+async fn get_uuid() -> Result<Value, String> {
+    
+    let uuid = crate::UUID.lock().unwrap().clone();
+    Ok(Value::String(uuid.to_string()))
+}
+
 async fn bluetooth_start_scan() -> Result<Value, String> {
-    Ok(Value::String("Scanning".to_string()))
+    let ble_device = BLEDevice::take();
+    let ble_scan = ble_device.get_scan();
+    ble_scan
+      .active_scan(true)
+      .interval(100)
+      .window(99)
+      .on_result(|_scan, param| {
+        info!("Advertised Device: {:?}", param);
+      });
+    ble_scan.start(5000).await;
+    
+    Ok(Value::Null)
 }
 
 pub async fn handle_rpc(
