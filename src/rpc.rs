@@ -1,4 +1,5 @@
 use esp32_nimble::BLEDevice;
+use log::info;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map};
 
@@ -55,7 +56,10 @@ async fn bluetooth_start_scan() -> Result<Value, String> {
     ble_scan
       .active_scan(true)
       .interval(100)
-      .window(99);
+      .window(99)
+      .on_result(|_scan, param| {
+        info!("Advertised Device: {:?}", param);
+      });
     let res =ble_scan.start(5000).await;
     if let Err(e) = res {
         return Err(format!("failed to start scan: {}", e));
@@ -79,7 +83,7 @@ async fn bluetooth_start_scan() -> Result<Value, String> {
             map.insert("manufacture_data".to_string(), Value::Array(data.iter().map(|b| Value::Number(Number::from(*b))).collect()));
         }
 
-        map.insert("adv_type".to_string(), Value::Number(Number::from(device.adv_type() as u8)));
+        map.insert("adv_type".to_string(), Value::String(std::format!("{:?}", device.adv_type())));
         let adv_flags: Option<esp32_nimble::enums::AdvFlag> = device.adv_flags();
         if let Some(flag) = adv_flags {
             map.insert("adv_flags".to_string(), Value::String(std::format!("{:?}", flag)));
@@ -88,7 +92,7 @@ async fn bluetooth_start_scan() -> Result<Value, String> {
         devices.push(Value::Object(map));
     }
     
-    Ok(Value::Null)
+    Ok(Value::Array(devices))
 }
 
 pub async fn handle_rpc(
