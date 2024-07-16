@@ -43,6 +43,10 @@ async fn sub(params: &Map<String, Value>) -> Result<Value, String> {
     };
     Ok(Value::Number(Number::from(a - b)))
 }
+ 
+async fn bluetooth_start_scan() -> Result<Value, String> {
+    Ok(Value::String("Scanning".to_string()))
+}
 
 pub async fn handle_rpc(
     payload: &str,
