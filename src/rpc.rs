@@ -79,8 +79,11 @@ async fn bluetooth_start_scan() -> Result<Value, String> {
             map.insert("manufacture_data".to_string(), Value::Array(data.iter().map(|b| Value::Number(Number::from(*b))).collect()));
         }
 
-        map.insert("adv_type".to_string(), Value::String(format!("{:?}", device.adv_type())));
-        map.insert("adv_flags".to_string(), Value::String(format!("{:?}", device.adv_flags())));
+        map.insert("adv_type".to_string(), Value::Number(Number::from(device.adv_type() as u8)));
+        let adv_flags: Option<esp32_nimble::enums::AdvFlag> = device.adv_flags();
+        if let Some(flag) = adv_flags {
+            map.insert("adv_flags".to_string(), Value::String(std::format!("{:?}", flag)));
+        }
 
         devices.push(Value::Object(map));
     }
@@ -115,9 +118,17 @@ pub async fn handle_rpc(
         _ => Err("unknown method".to_string()),
     };
     
-    let response = RpcResponse {
-        error: None,
-        result: result.ok(),
+    
+    let response = match result {
+        Ok(result) => RpcResponse {
+            error: None,
+            result: Some(result),
+        },
+        Err(e) => RpcResponse {
+            error: Some(e),
+            result: None,
+        },
     };
+    
     serde_json::to_string(&response)
 }
