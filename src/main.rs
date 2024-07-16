@@ -223,7 +223,7 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
         return Err(anyhow::Error::from(e));
     }
     let mut stream = connect_res.unwrap();
-    let _ = stream.write_all(b"Hello, world!").await;
+    let _ = stream.write_all(b"hello").await;
 
 
 

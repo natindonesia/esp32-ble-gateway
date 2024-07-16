@@ -57,11 +57,35 @@ async fn bluetooth_start_scan() -> Result<Value, String> {
     ble_scan
       .active_scan(true)
       .interval(100)
-      .window(99)
-      .on_result(|_scan, param| {
-        info!("Advertised Device: {:?}", param);
-      });
-    ble_scan.start(5000).await;
+      .window(99);
+    let res =ble_scan.start(5000).await;
+    if let Err(e) = res {
+        return Err(format!("failed to start scan: {}", e));
+    }
+    let results = ble_scan.get_results();
+    let mut devices = Vec::new();
+    for device in results {
+        let mut map = Map::new();
+        map.insert("name".to_string(), Value::String(device.name().to_string()));
+        map.insert("address".to_string(), Value::String(device.addr().to_string()));
+        map.insert("rssi".to_string(), Value::Number(Number::from(device.rssi())));
+        map.insert("service_uuids".to_string(), Value::Array(device.get_service_uuids().map(|uuid| Value::String(uuid.to_string())).collect()));
+        map.insert("service_data".to_string(), Value::Array(device.get_service_data_list().map(|data| {
+            let mut map = Map::new();
+            map.insert("uuid".to_string(), Value::String(data.uuid().to_string()));
+            map.insert("data".to_string(), Value::Array(data.data().iter().map(|b| Value::Number(Number::from(*b))).collect()));
+            Value::Object(map)
+        }).collect()));
+        let manufacture_data: Option<&[u8]> = device.get_manufacture_data();
+        if let Some(data) = manufacture_data {
+            map.insert("manufacture_data".to_string(), Value::Array(data.iter().map(|b| Value::Number(Number::from(*b))).collect()));
+        }
+
+        map.insert("adv_type".to_string(), Value::String(format!("{:?}", device.adv_type())));
+        map.insert("adv_flags".to_string(), Value::String(format!("{:?}", device.adv_flags())));
+
+        devices.push(Value::Object(map));
+    }
     
     Ok(Value::Null)
 }
@@ -88,6 +112,8 @@ pub async fn handle_rpc(
     let result = match request.method.as_str() {
         "add" => add(&request.params).await,
         "sub" => sub(&request.params).await,
+        "get_uuid" => get_uuid().await,
+        "bluetooth_start_scan" => bluetooth_start_scan().await,
         _ => Err("unknown method".to_string()),
     };
     
