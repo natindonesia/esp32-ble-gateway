@@ -217,7 +217,7 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         return Err(anyhow::Error::from(e));
     }
-    let (mut tcp_rx, mut tcp_tx): (
+    let (tcp_rx, mut tcp_tx): (
         tokio::net::tcp::OwnedReadHalf,
         tokio::net::tcp::OwnedWriteHalf,
     ) = connect_res.unwrap().into_split();
@@ -225,7 +225,7 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
     let _ = tcp_tx.write_all(b"hello").await;
 
     // multi producer single consumer channel
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(100);
+    let (tx, rx) = tokio::sync::mpsc::channel::<String>(100);
 
 
     info!("Waiting for response from TCP server");
