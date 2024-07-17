@@ -224,41 +224,55 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
     let _ = stream.write_all(b"hello").await;
 
 
-
+    // multi producer single consumer channel
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(100);
+    
 
     // listen for response
     let mut buf = [0; 1024];
 
     info!("Waiting for response from TCP server");
     loop {
-    
-        let n_res = stream.read(&mut buf).await;
-        if let Err(e) = n_res {
-            error!("Failed to read from TCP server: {:?}", e);
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            return Err(anyhow::Error::from(e));
-        }
-        let n = n_res.unwrap();
-        let s = std::str::from_utf8(&buf[..n]);
-        if let Err(e) = s {
-            error!("Failed to parse response from TCP server: {:?}", e);
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            return Err(anyhow::Error::from(e));
-        }
+        let stream_read_future = stream.read(&mut buf);
+        let rx_future = rx.recv();
+        tokio::select! {
+            n_res = stream_read_future => {
+                if let Err(e) = n_res {
+                    error!("Failed to read from TCP server: {:?}", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    return Err(anyhow::Error::from(e));
+                }
+                let n = n_res.unwrap();
+                let s = std::str::from_utf8(&buf[..n]);
+                if let Err(e) = s {
+                    error!("Failed to parse response from TCP server: {:?}", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    return Err(anyhow::Error::from(e));
+                }
 
-        let try_as_string = s.unwrap().trim().to_string();
+                let try_as_string = s.unwrap().trim().to_string();
 
-        info!("Got response from TCP server: {:?}", try_as_string);
-        
-        let res = rpc::handle_rpc(&try_as_string).await;
-        if let Err(e) = res {
-            let message = format!("Failed to handle rpc: {:?}", e);
-            let _ = stream.write_all(message.as_bytes()).await;
-            error!("{}", message);
-        }else{
-            let message = res.unwrap();
-            let _ = stream.write_all(message.as_bytes()).await;
-            info!("Sent response to TCP server: {:?}", message);
+                info!("Got response from TCP server: {:?}", try_as_string);
+                
+                let tx_clone = tx.clone();
+                tokio::spawn(async move {
+                    let res = rpc::handle_rpc(&try_as_string).await;
+                    if let Err(e) = res {
+                        let message = format!("Failed to handle rpc: {:?}", e);
+                        let _ = tx_clone.send(message.clone()).await;
+                        error!("{}", message);
+                    }else{
+                        let message = res.unwrap();
+                        let _ = tx_clone.send(message.clone()).await;
+                        info!("Sent response to TCP server: {:?}", message);
+                    }
+                });
+            },
+            message = rx_future => {
+                if let Some(message) = message {
+                    let _ = stream.write_all(message.as_bytes()).await;
+                }
+            }
         }
     }
     Ok(())
@@ -276,7 +290,7 @@ async fn led_loop<T: esp_idf_hal::gpio::Pin>(mut led_blue: PinDriver<'_, T, Outp
         let sleep_time = 5000 - (secs % 5000);
         let sleep_time = std::time::Duration::from_millis(sleep_time as u64);
         tokio::time::sleep(sleep_time).await;
-        
+
         
 
         const INTERVAL: std::time::Duration = std::time::Duration::from_millis(1000);
