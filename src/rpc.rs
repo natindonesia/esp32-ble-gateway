@@ -50,6 +50,28 @@ async fn get_uuid() -> Result<Value, String> {
     Ok(Value::String(uuid.to_string()))
 }
 
+async fn get_info() -> Result<Value, String> {
+    let mut map = Map::new();
+    let heap_caps_get_free_size = unsafe { esp_idf_sys::heap_caps_get_free_size(0) };
+    map.insert("heap_caps_get_free_size".to_string(), Value::Number(Number::from(
+        heap_caps_get_free_size
+    )));
+    let esp_get_minimum_free_heap_size = unsafe { esp_idf_sys::esp_get_minimum_free_heap_size() };
+    map.insert("esp_get_minimum_free_heap_size".to_string(), Value::Number(Number::from(
+        esp_get_minimum_free_heap_size
+    )));
+    let esp_get_free_heap_size = unsafe { esp_idf_sys::esp_get_free_heap_size() };
+    map.insert("esp_get_free_heap_size".to_string(), Value::Number(Number::from(
+        esp_get_free_heap_size
+    )));
+    
+
+
+
+    Ok(Value::Object(map))
+}
+
+
 async fn bluetooth_start_scan() -> Result<Value, String> {
     let ble_device = BLEDevice::take();
     let ble_scan = ble_device.get_scan();
@@ -119,6 +141,7 @@ pub async fn handle_rpc(
         "sub" => sub(&request.params).await,
         "get_uuid" => get_uuid().await,
         "bluetooth_start_scan" => bluetooth_start_scan().await,
+        "get_info" => get_info().await,
         _ => Err("unknown method".to_string()),
     };
     

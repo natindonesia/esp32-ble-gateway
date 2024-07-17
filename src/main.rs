@@ -258,7 +258,7 @@ async fn tcp_comm_loop_handle_read(
     mut stream: tokio::net::tcp::OwnedReadHalf,
     tx: tokio::sync::mpsc::Sender<String>,
 ) -> Result<()> {
-    let mut buf = [0; 4096];
+    let mut buf = [0; 8096]; // 
     loop {
         let n_res = stream.read(&mut buf).await;
         if let Err(e) = n_res {
