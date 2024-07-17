@@ -265,7 +265,20 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
 }
 
 async fn led_loop<T: esp_idf_hal::gpio::Pin>(mut led_blue: PinDriver<'_, T, Output>) -> Result<()> {
+    
     loop {
+        // allow syncronizhed blinking with other ESP32 without communication
+        // % 5 == 0
+        let current = std::time::SystemTime::now();
+        let since_the_epoch = current.duration_since(std::time::UNIX_EPOCH).unwrap();
+        let secs = since_the_epoch.as_millis();
+        // sleep until the next 5 second mark
+        let sleep_time = 5000 - (secs % 5000);
+        let sleep_time = std::time::Duration::from_millis(sleep_time as u64);
+        tokio::time::sleep(sleep_time).await;
+        
+        
+
         const INTERVAL: std::time::Duration = std::time::Duration::from_millis(1000);
         let _ = led_blue.set_low();
         tokio::time::sleep(INTERVAL).await;
