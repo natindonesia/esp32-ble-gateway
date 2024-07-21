@@ -6,12 +6,14 @@ use serde_json::{Map};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RpcRequest {
+    pub id: u64,
     pub method: String,
     pub params: Map<String, serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RpcResponse {
+    pub id: u64,
     pub error: Option<String>,
     pub result: Option<serde_json::Value>,
 }
@@ -129,6 +131,7 @@ pub async fn handle_rpc(
     let request_res: std::result::Result<RpcRequest, serde_json::Error> = serde_json::from_str(payload);
     if let Err(e) = request_res {
         let response = RpcResponse {
+            id: 0,
             error: Some(format!("failed to parse request: {}", e)),
             result: None,
         };
@@ -148,10 +151,12 @@ pub async fn handle_rpc(
     
     let response = match result {
         Ok(result) => RpcResponse {
+            id: request.id,
             error: None,
             result: Some(result),
         },
         Err(e) => RpcResponse {
+            id: request.id,
             error: Some(e),
             result: None,
         },

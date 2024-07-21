@@ -214,7 +214,6 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
     .await;
     if let Err(e) = connect_res {
         error!("Failed to connect to TCP server: {:?}", e);
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         return Err(anyhow::Error::from(e));
     }
     let (tcp_rx, mut tcp_tx): (
@@ -263,14 +262,12 @@ async fn tcp_comm_loop_handle_read(
         let n_res = stream.read(&mut buf).await;
         if let Err(e) = n_res {
             error!("Failed to read from TCP server: {:?}", e);
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             return Err(anyhow::Error::from(e));
         }
         let n = n_res.unwrap();
         let s = std::str::from_utf8(&buf[..n]);
         if let Err(e) = s {
             error!("Failed to parse response from TCP server: {:?}", e);
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             return Err(anyhow::Error::from(e));
         }
 
