@@ -220,7 +220,7 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
     ) = connect_res.unwrap().into_split();
 
     // multi producer single consumer channel
-    let (tx, rx) = tokio::sync::mpsc::channel::<String>(100);
+    let (tx, rx) = tokio::sync::mpsc::channel::<String>(5);
 
     let _ = tx.send("Hello from ESP32".to_string()).await;
     info!("Waiting for response from TCP server");
