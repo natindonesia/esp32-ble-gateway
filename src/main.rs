@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
@@ -273,10 +273,10 @@ async fn tcp_comm_loop_handle_read(
         let try_as_string = string.trim_end().to_string();
 
         info!("Got response from TCP server: {:?}", try_as_string);
-
-        let tx_clone = tx.clone();
+        let cloned_tx = tx.clone();
+        let tx_clone = Arc::new(cloned_tx);
         tokio::spawn(async move {
-            let res = rpc::handle_rpc(&try_as_string).await;
+            let res = rpc::handle_rpc(&try_as_string, tx_clone.clone()).await;
             if let Err(e) = res {
                 let message = format!("Failed to handle rpc: {:?}", e);
                 let _ = tx_clone.send(message.clone()).await;
