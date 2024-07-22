@@ -3,14 +3,12 @@ use std::sync::Mutex;
 use anyhow::Result;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 use esp_idf_hal::gpio::{Output, PinDriver};
-
+use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::nvs::EspNvs;
+use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use lazy_static::lazy_static;
 use log::{error, info};
-
-use esp_idf_svc::hal::task::block_on;
-use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use uuid::Uuid;
 
@@ -221,12 +219,12 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
         tokio::net::tcp::OwnedWriteHalf,
     ) = connect_res.unwrap().into_split();
 
-    let _ = tcp_tx.write_all(b"hello").await;
+
 
     // multi producer single consumer channel
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(100);
 
-
+    let _ = tx.send("Hello from ESP32".to_string()).await;
     info!("Waiting for response from TCP server");
 
     tokio::select! {
@@ -238,7 +236,7 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
         }
     }
 
-    Ok(())
+    Err(anyhow::Error::msg("TCP loop finished"))
 }
 
 async fn tcp_comm_loop_handle_write(
@@ -248,7 +246,13 @@ async fn tcp_comm_loop_handle_write(
     loop {
         let message = rx.recv().await;
         if let Some(message) = message {
-            let _ = stream.write_all(message.as_bytes()).await;
+            let bytes = message.as_bytes();
+
+            let mut bytes = bytes.to_vec();
+            //add newline
+            bytes.push(10);
+
+            let _ = stream.write_all(&bytes).await;
         }
     }
 }
@@ -257,21 +261,16 @@ async fn tcp_comm_loop_handle_read(
     mut stream: tokio::net::tcp::OwnedReadHalf,
     tx: tokio::sync::mpsc::Sender<String>,
 ) -> Result<()> {
-    let mut buf = [0; 8096]; // 
+    let mut reader = tokio::io::BufReader::new(stream);
+
     loop {
-        let n_res = stream.read(&mut buf).await;
-        if let Err(e) = n_res {
+        let mut string = String::new();
+        let read_res = reader.read_line(&mut string).await;
+        if let Err(e) = read_res {
             error!("Failed to read from TCP server: {:?}", e);
             return Err(anyhow::Error::from(e));
         }
-        let n = n_res.unwrap();
-        let s = std::str::from_utf8(&buf[..n]);
-        if let Err(e) = s {
-            error!("Failed to parse response from TCP server: {:?}", e);
-            return Err(anyhow::Error::from(e));
-        }
-
-        let try_as_string = s.unwrap().trim().to_string();
+        let try_as_string = string.trim_end().to_string();
 
         info!("Got response from TCP server: {:?}", try_as_string);
 

@@ -1,8 +1,10 @@
+use std::result::Result;
+
 use esp32_nimble::BLEDevice;
 use log::info;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map};
-
+use serde_json::{Number, Value};
+use serde_json::Map;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RpcRequest {
@@ -18,9 +20,6 @@ pub struct RpcResponse {
     pub result: Option<serde_json::Value>,
 }
 
-
-use serde_json::{ Value, Number};
-use std::result::Result;
 
 async fn add(params: &Map<String, Value>) -> Result<Value, String> {
     let a = match params.get("a").and_then(|v| v.as_i64()) {
@@ -91,6 +90,7 @@ async fn bluetooth_start_scan() -> Result<Value, String> {
     let results = ble_scan.get_results();
     let mut devices = Vec::new();
     for device in results {
+
         let mut map = Map::new();
         map.insert("name".to_string(), Value::String(device.name().to_string()));
         map.insert("address".to_string(), Value::String(device.addr().to_string()));
@@ -113,6 +113,7 @@ async fn bluetooth_start_scan() -> Result<Value, String> {
             map.insert("adv_flags".to_string(), Value::String(std::format!("{:?}", flag)));
         }
 
+        map.insert("raw_data".to_string(), Value::Array(device.raw_data.iter().map(|b| Value::Number(Number::from(*b))).collect()));
         devices.push(Value::Object(map));
     }
     
