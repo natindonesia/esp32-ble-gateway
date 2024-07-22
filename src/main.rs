@@ -219,8 +219,6 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
         tokio::net::tcp::OwnedWriteHalf,
     ) = connect_res.unwrap().into_split();
 
-
-
     // multi producer single consumer channel
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(100);
 
@@ -246,6 +244,8 @@ async fn tcp_comm_loop_handle_write(
     loop {
         let message = rx.recv().await;
         if let Some(message) = message {
+
+            info!("Sent response to TCP server: {:?}", message);
             let bytes = message.as_bytes();
 
             let mut bytes = bytes.to_vec();
@@ -273,22 +273,21 @@ async fn tcp_comm_loop_handle_read(
         let try_as_string = string.trim_end().to_string();
 
         info!("Got response from TCP server: {:?}", try_as_string);
-        let cloned_tx = tx.clone();
-        let tx_clone = Arc::new(cloned_tx);
+
+        let tx_clone = Arc::new(tx.clone());
+        let tx_clone2 = tx_clone.clone();
         tokio::spawn(async move {
-            let res = rpc::handle_rpc(&try_as_string, tx_clone.clone()).await;
+            let res = rpc::handle_rpc(&try_as_string, tx_clone).await;
             if let Err(e) = res {
                 let message = format!("Failed to handle rpc: {:?}", e);
-                let _ = tx_clone.send(message.clone()).await;
+                let _ = tx_clone2.send(message.clone()).await;
                 error!("{}", message);
             } else {
                 let message = res.unwrap();
-                let _ = tx_clone.send(message.clone()).await;
-                info!("Sent response to TCP server: {:?}", message);
+                let _ = tx_clone2.send(message.clone()).await;
             }
         });
     }
-    
 }
 
 async fn led_loop<T: esp_idf_hal::gpio::Pin>(mut led_blue: PinDriver<'_, T, Output>) -> Result<()> {
