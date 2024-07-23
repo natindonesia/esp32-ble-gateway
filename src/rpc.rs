@@ -23,9 +23,58 @@ pub struct RpcResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Event {
+pub struct Event<T> {
     pub name: String,
-    pub data: Option<serde_json::Value>,
+    pub data: Option<T>,
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MyBLEServiceData {
+    pub uuid: String,
+    pub data: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MyBLEAdvertisedDevice{
+    pub name: String,
+    pub address: String,
+    pub rssi: i32,
+    pub adv_type: String,
+    pub adv_flags: String,
+    pub raw_data: Vec<u8>,
+    pub service_uuids: Vec<String>,
+    pub service_data_list: Vec<MyBLEServiceData>,
+    pub manufacture_data: Option<Vec<u8>>,
+
+}
+
+impl From<BLEAdvertisedDevice> for MyBLEAdvertisedDevice {
+    fn from(device: BLEAdvertisedDevice) -> Self {
+        let adv_flags: Option<esp32_nimble::enums::AdvFlag> = device.adv_flags();
+        let adv_flags_str = match adv_flags {
+            Some(flag) => std::format!("{:?}", flag),
+            None => "".to_string(),
+        };
+        Self {
+            name: device.name().to_string(),
+            address: device.addr().to_string(),
+            rssi: device.rssi(),
+            adv_type: std::format!("{:?}", device.adv_type()),
+            adv_flags: adv_flags_str,
+            raw_data: device.raw_data.clone(),
+            service_uuids: device.get_service_uuids().map(|uuid| uuid.to_string()).collect(),
+            service_data_list: device.get_service_data_list().map(|data| {
+                MyBLEServiceData {
+                    uuid: data.uuid().to_string(),
+                    data: data.data().to_vec(),
+                }
+            }).collect(),
+            manufacture_data: device.get_manufacture_data().map(|data| data.to_vec()),
+
+            
+        }
+    }
 }
 
 async fn add(params: &Map<String, Value>) -> Result<Value, String> {
@@ -79,84 +128,10 @@ async fn get_info() -> Result<Value, String> {
 }
 
 async fn on_ble_scan_result(device: BLEAdvertisedDevice) -> Result<String, String> {
-    let mut map: Map<String, Value> = Map::new();
-    map.insert("name".to_string(), Value::String(device.name().to_string()));
-    map.insert(
-        "address".to_string(),
-        Value::String(device.addr().to_string()),
-    );
-    map.insert(
-        "rssi".to_string(),
-        Value::Number(Number::from(device.rssi())),
-    );
-    map.insert(
-        "service_uuids".to_string(),
-        Value::Array(
-            device
-                .get_service_uuids()
-                .map(|uuid| Value::String(uuid.to_string()))
-                .collect(),
-        ),
-    );
-    map.insert(
-        "service_data".to_string(),
-        Value::Array(
-            device
-                .get_service_data_list()
-                .map(|data| {
-                    let mut map = Map::new();
-                    map.insert("uuid".to_string(), Value::String(data.uuid().to_string()));
-                    map.insert(
-                        "data".to_string(),
-                        Value::Array(
-                            data.data()
-                                .iter()
-                                .map(|b| Value::Number(Number::from(*b)))
-                                .collect(),
-                        ),
-                    );
-                    Value::Object(map)
-                })
-                .collect(),
-        ),
-    );
-    let manufacture_data: Option<&[u8]> = device.get_manufacture_data();
-    if let Some(data) = manufacture_data {
-        map.insert(
-            "manufacture_data".to_string(),
-            Value::Array(
-                data.iter()
-                    .map(|b| Value::Number(Number::from(*b)))
-                    .collect(),
-            ),
-        );
-    }
-
-    map.insert(
-        "adv_type".to_string(),
-        Value::String(std::format!("{:?}", device.adv_type())),
-    );
-    let adv_flags: Option<esp32_nimble::enums::AdvFlag> = device.adv_flags();
-    if let Some(flag) = adv_flags {
-        map.insert(
-            "adv_flags".to_string(),
-            Value::String(std::format!("{:?}", flag)),
-        );
-    }
-
-    map.insert(
-        "raw_data".to_string(),
-        Value::Array(
-            device
-                .raw_data
-                .iter()
-                .map(|b| Value::Number(Number::from(*b)))
-                .collect(),
-        ),
-    );
+    
     let event = Event {
         name: "ble_scan_result".to_string(),
-        data: Some(Value::Object(map)),
+        data: Some(MyBLEAdvertisedDevice::from(device)),
     };
     let event_str_res = serde_json::to_string(&event);
     if let Err(e) = event_str_res {
