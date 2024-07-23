@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::result::Result;
 
 use esp32_nimble::{BLEAdvertisedDevice, BLEDevice};

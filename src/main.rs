@@ -8,7 +8,7 @@ use esp_idf_svc::nvs::EspNvs;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use lazy_static::lazy_static;
 use log::{error, info};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use uuid::Uuid;
 
@@ -214,7 +214,7 @@ async fn tcp_comm() -> Result<(), anyhow::Error> {
         error!("Failed to connect to TCP server: {:?}", e);
         return Err(anyhow::Error::from(e));
     }
-    let (tcp_rx, mut tcp_tx): (
+    let (tcp_rx, tcp_tx): (
         tokio::net::tcp::OwnedReadHalf,
         tokio::net::tcp::OwnedWriteHalf,
     ) = connect_res.unwrap().into_split();
@@ -258,7 +258,7 @@ async fn tcp_comm_loop_handle_write(
 }
 
 async fn tcp_comm_loop_handle_read(
-    mut stream: tokio::net::tcp::OwnedReadHalf,
+    stream: tokio::net::tcp::OwnedReadHalf,
     tx: tokio::sync::mpsc::Sender<String>,
 ) -> Result<()> {
     let mut reader = tokio::io::BufReader::new(stream);
