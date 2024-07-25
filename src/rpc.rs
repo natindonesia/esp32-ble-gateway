@@ -1,10 +1,11 @@
 use std::result::Result;
+use std::sync::{Arc, Mutex};
 
 use esp32_nimble::{BLEAdvertisedDevice, BLEDevice};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
-use serde_json::Map;
 use serde_json::{Number, Value};
+use serde_json::Map;
 use tokio::sync::mpsc::Sender;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -140,8 +141,6 @@ async fn on_ble_scan_result(device: BLEAdvertisedDevice) -> Result<String, Strin
     return Ok(event_str);  
 }
 
-use std::sync::{Arc, Mutex};
-
 async fn bluetooth_start_scan(tx: Arc<Sender<String>>) -> Result<Value, String> {
     let ble_device = BLEDevice::take();
     let ble_scan = ble_device.get_scan();
@@ -201,6 +200,7 @@ async fn bluetooth_start_scan(tx: Arc<Sender<String>>) -> Result<Value, String> 
                 warn!("scan failed: {:?}", e);
             }
         }
+        ble_scan.clear_results();
         listener.abort();
     });
 
