@@ -357,6 +357,80 @@ async fn ble_write_characteristic(params: &Map<String, Value>, app_state: AppSta
     Ok(Value::String("OK".to_string()))
 }
 
+async fn ble_subscribe_characteristic(params: &Map<String, Value>, tx: Arc<Sender<String>>, app_state: AppState) -> Result<Value, String> {
+    let address = read_param!(params, "address", String);
+    let service_uuid = read_param!(params, "service_uuid", String);
+    let characteristic_uuid = read_param!(params, "characteristic_uuid", String);
+
+    let uuid_res = BleUuid::from_uuid128_string(&characteristic_uuid);
+    if let Err(e) = uuid_res {
+        return Err(format!("failed to parse characteristic uuid: {:?}", e));
+    }
+    let characteristic_uuid = uuid_res.unwrap();
+
+    let uuid_res = BleUuid::from_uuid128_string(&service_uuid);
+    if let Err(e) = uuid_res {
+        return Err(format!("failed to parse service uuid: {:?}", e));
+    }
+    let service_uuid = uuid_res.unwrap();
+
+    let client_res = ble_find_client(address, app_state).await;
+    if let Err(e) = client_res {
+        return Err(format!("failed to find client: {:?}", e));
+    }
+    let mut client = client_res.unwrap();
+
+    let service = client.get_service(service_uuid).await;
+    if let Err(e) = service {
+        return Err(format!("failed to get service: {:?}", e));
+    }
+    let service = service.unwrap();
+
+    let characteristic = service.get_characteristic(characteristic_uuid).await;
+    if let Err(e) = characteristic {
+        return Err(format!("failed to get characteristic: {:?}", e));
+    }
+    let characteristic = characteristic.unwrap();
+    if !(characteristic.can_notify()) {
+        return Err("characteristic does not support notifications".to_string());
+    }
+
+
+    let address = address.to_string();
+    let service_uuid = service_uuid.to_string();
+    let characteristic_uuid = characteristic_uuid.to_string();
+    let res = characteristic
+        .on_notify(move |data| {
+            let tx_cloned = Arc::clone(&tx);
+            let event = BLENotifyEvent {
+                address: address.clone(),
+                service_uuid: service_uuid.clone(),
+                characteristic_uuid: characteristic_uuid.clone(),
+                data: hex::encode(data),
+            };
+            let event_str_res = serde_json::to_string(&Event {
+                name: "ble_notify".to_string(),
+                data: Some(event),
+            });
+            if let Err(e) = event_str_res {
+                log::error!("failed to serialize event: {:?}", e);
+                return;
+            }
+            let event_str = event_str_res.unwrap();
+            let res = tx_cloned.blocking_send(event_str);
+            if let Err(e) = res {
+                log::error!("failed to send event: {:?}", e);
+            }
+        })
+        .subscribe_notify(false)
+        .await;
+    if let Err(e) = res {
+        return Err(format!("failed to subscribe to notifications: {:?}", e));
+    }
+
+    Ok(Value::String("OK".to_string()))
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BLENotifyEvent {
     pub address: String,
@@ -386,6 +460,7 @@ pub async fn handle_rpc(payload: &str, tx: Arc<Sender<String>>, app_state: AppSt
         "bluetooth_start_scan" => bluetooth_start_scan(tx).await,
         "ble_read_characteristic" => ble_read_characteristic(&request.params, app_state).await,
         "ble_write_characteristic" => ble_write_characteristic(&request.params, app_state).await,
+        "ble_subscribe_characteristic" => ble_subscribe_characteristic(&request.params, tx, app_state).await,
         "get_info" => get_info().await,
         _ => Err("unknown method".to_string()),
     };
