@@ -1,12 +1,16 @@
 use std::result::Result;
 use std::sync::{Arc, Mutex};
 
-use esp32_nimble::{BLEAdvertisedDevice, BLEDevice};
+use esp32_nimble::{BLEAdvertisedDevice, BLEClient, BLEDevice, BLERemoteService, uuid128};
+use esp32_nimble::utilities::BleUuid;
+use lazy_static::lazy_static;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 use serde_json::Map;
 use tokio::sync::mpsc::Sender;
+
+use crate::AppState;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RpcRequest {
@@ -36,7 +40,7 @@ pub struct MyBLEServiceData {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct MyBLEAdvertisedDevice{
+pub struct MyBLEAdvertisedDevice {
     pub name: String,
     pub address: String,
     pub rssi: i32,
@@ -72,7 +76,6 @@ impl From<BLEAdvertisedDevice> for MyBLEAdvertisedDevice {
             }).collect(),
             manufacture_data: device.get_manufacture_data().map(|data| data.to_vec()),
 
-            
         }
     }
 }
@@ -128,7 +131,6 @@ async fn get_info() -> Result<Value, String> {
 }
 
 async fn on_ble_scan_result(device: BLEAdvertisedDevice) -> Result<String, String> {
-    
     let event = Event {
         name: "ble_scan_result".to_string(),
         data: Some(MyBLEAdvertisedDevice::from(device)),
@@ -138,7 +140,7 @@ async fn on_ble_scan_result(device: BLEAdvertisedDevice) -> Result<String, Strin
         return Err(format!("failed to serialize event: {:?}", e));
     }
     let event_str = event_str_res.unwrap();
-    return Ok(event_str);  
+    return Ok(event_str);
 }
 
 async fn bluetooth_start_scan(tx: Arc<Sender<String>>) -> Result<Value, String> {
@@ -156,7 +158,7 @@ async fn bluetooth_start_scan(tx: Arc<Sender<String>>) -> Result<Value, String> 
             let mut devices_queue = devices_queue.lock().unwrap();
             devices_queue.push(device.clone());
         });
-    
+
 
     let listener = tokio::spawn(async move {
         let devices_queue = Arc::clone(&devices_queue2);
@@ -207,7 +209,164 @@ async fn bluetooth_start_scan(tx: Arc<Sender<String>>) -> Result<Value, String> 
     Ok(Value::String("OK".to_string()))
 }
 
-pub async fn handle_rpc(payload: &str, tx: Arc<Sender<String>>) -> serde_json::Result<String> {
+macro_rules! read_param {
+    ($params:ident, $name:expr, $type:ty) => {
+        match $params.get($name).and_then(|v| v.as_str()) {
+            Some(val) => val,
+            None => return Err(format!("Parameter '{}' is missing or not a string", $name)),
+        }
+    };
+}
+
+async fn ble_find_client(addr: &str, app_state: AppState) -> Result<BLEClient, String> {
+    // check if it's already connected
+    for i in 0..app_state.ble_clients.len() {
+        let client_opt = app_state.ble_clients.get(i);
+        if client_opt.is_none() {
+            continue;
+        }
+        let client = client_opt.unwrap();
+        let desc = client.desc();
+        if desc.is_ok() && desc.unwrap().address().to_string() == addr {
+            // we borrow this
+            //
+        }
+    }
+
+
+    let ble_device = BLEDevice::take();
+    let ble_scan = ble_device.get_scan();
+    let search_res = ble_scan
+        .active_scan(true)
+        .interval(100)
+        .window(99)
+        .find_device(5000, |device| device.addr().to_string() == addr)
+        .await;
+    if let Err(e) = search_res {
+        return Err(format!("failed to find device: {:?}", e));
+    }
+
+    let device = search_res.unwrap();
+    if device.is_none() {
+        return Err("device not found".to_string());
+    }
+    let device = device.unwrap();
+    let mut client = BLEClient::new();
+    client.on_connect(|client| {
+        client.update_conn_params(120, 120, 0, 60).unwrap();
+    });
+    let res = client.connect(device.addr()).await;
+    if let Err(e) = res {
+        return Err(format!("failed to connect to device: {:?}", e));
+    }
+    Ok(client)
+}
+
+
+async fn ble_read_characteristic(params: &Map<String, Value>, app_state: AppState) -> Result<Value, String> {
+    let address = read_param!(params, "address", String);
+    let service_uuid = read_param!(params, "service_uuid", String);
+    let characteristic_uuid = read_param!(params, "characteristic_uuid", String);
+
+
+    let uuid_res = BleUuid::from_uuid128_string(&characteristic_uuid);
+    if let Err(e) = uuid_res {
+        return Err(format!("failed to parse characteristic uuid: {:?}", e));
+    }
+    let characteristic_uuid = uuid_res.unwrap();
+
+
+    let uuid_res = BleUuid::from_uuid128_string(&service_uuid);
+    if let Err(e) = uuid_res {
+        return Err(format!("failed to parse service uuid: {:?}", e));
+    }
+    let service_uuid = uuid_res.unwrap();
+
+    let client_res = ble_find_client(address, app_state).await;
+
+
+    if let Err(e) = client_res {
+        return Err(format!("failed to find client: {:?}", e));
+    }
+    let mut client = client_res.unwrap();
+
+
+    let service = client.get_service(service_uuid).await;
+    if let Err(e) = service {
+        return Err(format!("failed to get service: {:?}", e));
+    }
+    let service = service.unwrap();
+
+    let characteristic = service.get_characteristic(characteristic_uuid).await;
+    if let Err(e) = characteristic {
+        return Err(format!("failed to get characteristic: {:?}", e));
+    }
+    let characteristic = characteristic.unwrap();
+    let value = characteristic.read_value().await;
+    if let Err(e) = value {
+        return Err(format!("failed to read value: {:?}", e));
+    }
+    let value = value.unwrap();
+    Ok(Value::String(hex::encode(value)))
+}
+
+async fn ble_write_characteristic(params: &Map<String, Value>, app_state: AppState) -> Result<Value, String> {
+    let address = read_param!(params, "address", String);
+    let service_uuid = read_param!(params, "service_uuid", String);
+    let characteristic_uuid = read_param!(params, "characteristic_uuid", String);
+    let value = read_param!(params, "value", String);
+
+    let uuid_res = BleUuid::from_uuid128_string(&characteristic_uuid);
+    if let Err(e) = uuid_res {
+        return Err(format!("failed to parse characteristic uuid: {:?}", e));
+    }
+    let characteristic_uuid = uuid_res.unwrap();
+
+    let uuid_res = BleUuid::from_uuid128_string(&service_uuid);
+    if let Err(e) = uuid_res {
+        return Err(format!("failed to parse service uuid: {:?}", e));
+    }
+    let service_uuid = uuid_res.unwrap();
+
+    let client_res = ble_find_client(address, app_state).await;
+    if let Err(e) = client_res {
+        return Err(format!("failed to find client: {:?}", e));
+    }
+    let mut client = client_res.unwrap();
+
+    let service = client.get_service(service_uuid).await;
+    if let Err(e) = service {
+        return Err(format!("failed to get service: {:?}", e));
+    }
+    let service = service.unwrap();
+
+    let characteristic = service.get_characteristic(characteristic_uuid).await;
+    if let Err(e) = characteristic {
+        return Err(format!("failed to get characteristic: {:?}", e));
+    }
+    let characteristic = characteristic.unwrap();
+    let value = hex::decode(value);
+    if let Err(e) = value {
+        return Err(format!("failed to decode value: {:?}", e));
+    }
+    let value = value.unwrap();
+    let res = characteristic.write_value(&value, true).await;
+    if let Err(e) = res {
+        return Err(format!("failed to write value: {:?}", e));
+    }
+    Ok(Value::String("OK".to_string()))
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BLENotifyEvent {
+    pub address: String,
+    pub service_uuid: String,
+    pub characteristic_uuid: String,
+    pub data: String,
+}
+
+
+pub async fn handle_rpc(payload: &str, tx: Arc<Sender<String>>, app_state: AppState) -> serde_json::Result<String> {
     let request_res: std::result::Result<RpcRequest, serde_json::Error> =
         serde_json::from_str(payload);
     if let Err(e) = request_res {
@@ -225,6 +384,8 @@ pub async fn handle_rpc(payload: &str, tx: Arc<Sender<String>>) -> serde_json::R
         "sub" => sub(&request.params).await,
         "get_uuid" => get_uuid().await,
         "bluetooth_start_scan" => bluetooth_start_scan(tx).await,
+        "ble_read_characteristic" => ble_read_characteristic(&request.params, app_state).await,
+        "ble_write_characteristic" => ble_write_characteristic(&request.params, app_state).await,
         "get_info" => get_info().await,
         _ => Err("unknown method".to_string()),
     };
