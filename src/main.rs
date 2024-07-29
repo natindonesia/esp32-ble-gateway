@@ -266,7 +266,7 @@ async fn mqtt_loop() -> Result<()> {
     
     tokio::select! {
         _ = async {
-            let &mut connection = con;
+            let mut connection = con;
             loop{
                 let event = connection.next().await;
                 if event.is_err() {
