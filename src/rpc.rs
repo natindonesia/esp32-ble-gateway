@@ -219,19 +219,6 @@ macro_rules! read_param {
 }
 
 async fn ble_find_client(addr: &str, app_state: AppState) -> Result<BLEClient, String> {
-    // check if it's already connected
-    for i in 0..app_state.ble_clients.len() {
-        let client_opt = app_state.ble_clients.get(i);
-        if client_opt.is_none() {
-            continue;
-        }
-        let client = client_opt.unwrap();
-        let desc = client.desc();
-        if desc.is_ok() && desc.unwrap().address().to_string() == addr {
-            // we borrow this
-            //
-        }
-    }
 
 
     let ble_device = BLEDevice::take();
