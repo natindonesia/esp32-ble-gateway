@@ -8,7 +8,7 @@ use esp32_nimble::BLEClient;
 use esp_idf_hal::gpio::{Output, PinDriver};
 use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::mqtt::client::{
-    EspAsyncMqttClient, EspAsyncMqttConnection, EspMqttClient, EspMqttEvent, EventPayload, MqttClientConfiguration
+    EspAsyncMqttClient, EspAsyncMqttConnection, EspMqttClient, EspMqttEvent, EventPayload, MqttClientConfiguration,
 };
 use esp_idf_svc::nvs::EspNvs;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
@@ -33,7 +33,7 @@ pub struct Config {
     wifi_ssid: &'static str,
     #[default("")]
     wifi_psk: &'static str,
-    #[default("mqtt://192.168.1.39:1883")]
+    #[default("mqtt://192.168.1.8:1883")]
     mqtt_endpoint: &'static str,
 }
 
@@ -199,25 +199,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-
-async fn mqtt_loop() -> Result<()> {
-    let app_config = CONFIG;
-    let device_uuid = UUID.lock().unwrap().clone();
-    let formatted_string = format!("esp32-ble-proxy-{}", device_uuid.to_string());
-    let client_id = Some(formatted_string.as_str());
-
-    let mqtt_config = MqttClientConfiguration {
-        client_id,
-        ..Default::default()
-    };
-
-    let res = EspAsyncMqttClient::new(app_config.mqtt_endpoint, &mqtt_config);
-    if res.is_err() {
-        log::error!("Failed to create mqtt client: {:?}", res.err());
-        return Ok(());
-    }
-    let (mut client, con) = res.unwrap();
-
+async fn init_mqtt(client: &mut EspAsyncMqttClient) {
     loop {
         let res = client.subscribe(
             "esp32-ble-proxy",
@@ -250,7 +232,7 @@ async fn mqtt_loop() -> Result<()> {
         let res = client.publish(
             "esp32-ble-proxy",
             esp_idf_svc::mqtt::client::QoS::AtMostOnce,
-            true,
+            false,
             payload_register_message.as_bytes(),
         ).await;
         if res.is_err() {
@@ -261,9 +243,29 @@ async fn mqtt_loop() -> Result<()> {
     }
 
     info!("Sent hello message");
+}
+
+async fn mqtt_loop() -> Result<()> {
+    let app_config = CONFIG;
+    let device_uuid = UUID.lock().unwrap().clone();
+    let formatted_string = format!("esp32-ble-proxy-{}", device_uuid.to_string());
+    let client_id = Some(formatted_string.as_str());
+
+    let mqtt_config = MqttClientConfiguration {
+        client_id,
+        ..Default::default()
+    };
+
+    let res = EspAsyncMqttClient::new(app_config.mqtt_endpoint, &mqtt_config);
+    if res.is_err() {
+        log::error!("Failed to create mqtt client: {:?}", res.err());
+        return Ok(());
+    }
+    let (mut client, con) = res.unwrap();
+
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<EventPayload<'_, EspError>>(32);
-    
+
     tokio::select! {
         _ = async {
             let mut connection = con;
@@ -282,6 +284,7 @@ async fn mqtt_loop() -> Result<()> {
             error!("MQTT Connection closed");
         } => {},
         _ = async {
+            init_mqtt(&mut client).await;
             loop {
                 let payload = rx.recv().await;
                 if payload.is_none() {
