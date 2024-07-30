@@ -200,14 +200,14 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-async fn init_mqtt(client: &mut EspAsyncMqttClient) {
+async fn init_mqtt(client: &mut EspMqttClient<'_>) {
     loop {
         let res = client
             .subscribe(
                 "esp32-ble-proxy",
                 esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
             )
-            .await;
+            ;
         if res.is_err() {
             log::error!("Failed to subscribe to topic: {:?}", res.err());
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -221,7 +221,7 @@ async fn init_mqtt(client: &mut EspAsyncMqttClient) {
                 format!("esp32-ble-proxy/{}", UUID.lock().unwrap().to_string()).as_str(),
                 esp_idf_svc::mqtt::client::QoS::ExactlyOnce,
             )
-            .await;
+            ;
         if res.is_err() {
             log::error!("Failed to subscribe to topic: {:?}", res.err());
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -241,7 +241,7 @@ async fn init_mqtt(client: &mut EspAsyncMqttClient) {
                 false,
                 payload_register_message.as_bytes(),
             )
-            .await;
+            ;
         if res.is_err() {
             log::error!("Failed to send register message: {:?}", res.err());
             continue;
@@ -263,7 +263,7 @@ async fn mqtt_loop() -> Result<()> {
         ..Default::default()
     };
 
-    let res = EspAsyncMqttClient::new(app_config.mqtt_endpoint, &mqtt_config);
+    let res = EspMqttClient::new(app_config.mqtt_endpoint, &mqtt_config);
     if res.is_err() {
         log::error!("Failed to create mqtt client: {:?}", res.err());
         return Ok(());
@@ -273,48 +273,42 @@ async fn mqtt_loop() -> Result<()> {
     let workload = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
     let workload_copy = workload.clone();
     let thread_handle = std::thread::spawn(move || {
-        let mut rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(async {
-            let mut connection = con;
-            loop{
-                let event = connection.next().await;
-                if event.is_err() {
-                    log::error!("Failed to get event: {:?}", event.err());
-                    continue;
-                }
-                let event = event.unwrap();
-                let payload = event.payload();
-                  match payload {
-                    EventPayload::Received {
-                        id,
-                        topic,
-                        data,
-                        details,
-                        ..
-                    } => {
-                        match details {
-                            esp_idf_svc::mqtt::client::Details::Complete => {
-                                // good
-                            },
-                            _ => {
-                                log::error!("MQTT: {:?}", details);
-                                continue;
-                            }
-                        }
-                        workload_copy.lock().unwrap().push(data.to_vec());
-                        log::info!("MQTT: {:?}", topic);
-                    },
-                    _ => {
-                        log::info!("MQTT: {:?}", payload);
-                    }
-                  }
+        let mut connection = con;
+        loop{
+            let event = connection.next();
+            if event.is_err() {
+                log::error!("Failed to get event: {:?}", event.err());
+                continue;
             }
+            let event = event.unwrap();
+            let payload = event.payload();
+              match payload {
+                EventPayload::Received {
+                    id,
+                    topic,
+                    data,
+                    details,
+                    ..
+                } => {
+                    match details {
+                        esp_idf_svc::mqtt::client::Details::Complete => {
+                            // good
+                        },
+                        _ => {
+                            log::error!("MQTT: {:?}", details);
+                            continue;
+                        }
+                    }
+                    workload_copy.lock().unwrap().push(data.to_vec());
+                    log::info!("MQTT: {:?}", topic);
+                },
+                _ => {
+                    log::info!("MQTT: {:?}", payload);
+                }
+              }
+        }
 
-            error!("MQTT Connection closed");
-        });
+        error!("MQTT Connection closed");
     });
 
     init_mqtt(&mut client).await;
