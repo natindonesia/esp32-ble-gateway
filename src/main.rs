@@ -8,7 +8,8 @@ use esp32_nimble::BLEClient;
 use esp_idf_hal::gpio::{Output, PinDriver};
 use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::mqtt::client::{
-    EspAsyncMqttClient, EspAsyncMqttConnection, EspMqttClient, EspMqttEvent, EventPayload, MqttClientConfiguration,
+    EspAsyncMqttClient, EspAsyncMqttConnection, EspMqttClient, EspMqttEvent, EventPayload,
+    MqttClientConfiguration,
 };
 use esp_idf_svc::nvs::EspNvs;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
@@ -201,10 +202,12 @@ fn main() -> Result<()> {
 
 async fn init_mqtt(client: &mut EspAsyncMqttClient) {
     loop {
-        let res = client.subscribe(
-            "esp32-ble-proxy",
-            esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
-        ).await;
+        let res = client
+            .subscribe(
+                "esp32-ble-proxy",
+                esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
+            )
+            .await;
         if res.is_err() {
             log::error!("Failed to subscribe to topic: {:?}", res.err());
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -213,10 +216,12 @@ async fn init_mqtt(client: &mut EspAsyncMqttClient) {
         break;
     }
     loop {
-        let res = client.subscribe(
-            format!("esp32-ble-proxy/{}", UUID.lock().unwrap().to_string()).as_str(),
-            esp_idf_svc::mqtt::client::QoS::ExactlyOnce,
-        ).await;
+        let res = client
+            .subscribe(
+                format!("esp32-ble-proxy/{}", UUID.lock().unwrap().to_string()).as_str(),
+                esp_idf_svc::mqtt::client::QoS::ExactlyOnce,
+            )
+            .await;
         if res.is_err() {
             log::error!("Failed to subscribe to topic: {:?}", res.err());
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -229,12 +234,14 @@ async fn init_mqtt(client: &mut EspAsyncMqttClient) {
         UUID.lock().unwrap().to_string()
     );
     loop {
-        let res = client.publish(
-            "esp32-ble-proxy",
-            esp_idf_svc::mqtt::client::QoS::AtMostOnce,
-            false,
-            payload_register_message.as_bytes(),
-        ).await;
+        let res = client
+            .publish(
+                "esp32-ble-proxy",
+                esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
+                false,
+                payload_register_message.as_bytes(),
+            )
+            .await;
         if res.is_err() {
             log::error!("Failed to send register message: {:?}", res.err());
             continue;
@@ -263,35 +270,24 @@ async fn mqtt_loop() -> Result<()> {
     }
     let (mut client, con) = res.unwrap();
 
-
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<EventPayload<'_, EspError>>(32);
-
-    tokio::select! {
-        _ = async {
+    let workload = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+    let workload_copy = workload.clone();
+    let thread_handle = std::thread::spawn(move || {
+        let mut rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
             let mut connection = con;
             loop{
                 let event = connection.next().await;
                 if event.is_err() {
                     log::error!("Failed to get event: {:?}", event.err());
+                    continue;
                 }
                 let event = event.unwrap();
                 let payload = event.payload();
-                log::info!("MQTT: {:?}", payload);
-
-                
-            }
-            
-            error!("MQTT Connection closed");
-        } => {},
-        _ = async {
-            init_mqtt(&mut client).await;
-            loop {
-                let payload = rx.recv().await;
-                if payload.is_none() {
-                    break;
-                }
-                let payload = payload.unwrap();
-                match payload {
+                  match payload {
                     EventPayload::Received {
                         id,
                         topic,
@@ -299,14 +295,46 @@ async fn mqtt_loop() -> Result<()> {
                         details,
                         ..
                     } => {
-                        
+                        match details {
+                            esp_idf_svc::mqtt::client::Details::Complete => {
+                                // good
+                            },
+                            _ => {
+                                log::error!("MQTT: {:?}", details);
+                                continue;
+                            }
+                        }
+                        workload_copy.lock().unwrap().push(data.to_vec());
+                        log::info!("MQTT: {:?}", topic);
                     },
                     _ => {
                         log::info!("MQTT: {:?}", payload);
                     }
-                }
+                  }
             }
-        } => {},
+
+            error!("MQTT Connection closed");
+        });
+    });
+
+    init_mqtt(&mut client).await;
+    loop {
+        let mut workload = workload.lock().unwrap();
+        if workload.len() > 0 {
+            let data = workload.remove(0);
+            let string = std::str::from_utf8(&data).unwrap();
+            log::info!("Got data: {:?}", string);
+        }
+        // check if thread died
+        if thread_handle.is_finished() {
+            log::error!("Thread died :(");
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let res = thread_handle.join();
+    if res.is_err() {
+        log::error!("Failed to join thread: {:?}", res.err());
     }
     Ok(())
 }
