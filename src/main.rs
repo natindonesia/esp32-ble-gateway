@@ -38,10 +38,15 @@ pub struct Config {
     mqtt_endpoint: &'static str,
 }
 
+
+const MQTT_TOPIC_RECEIVE: &str = "esp32-ble-proxy/devices";
+
+
 pub struct AppState {}
 
 lazy_static! {
     static ref UUID: Mutex<Uuid> = Mutex::new(Uuid::nil());
+    static ref MQTT_TOPIC_SEND: Mutex<String> = Mutex::new("".to_string()); // esp32-ble-proxy/devices/UUID
 }
 
 /// Entry point to our application.
@@ -122,6 +127,7 @@ fn main() -> Result<()> {
 
     // Add the UUID to the global static
     *UUID.lock().unwrap() = uuid;
+    *MQTT_TOPIC_SEND.lock().unwrap() = format!("{}/{}", MQTT_TOPIC_RECEIVE, uuid.to_string());
 
     info!("------------------------------------");
     info!("UUID: {:?}", uuid);
@@ -202,9 +208,11 @@ fn main() -> Result<()> {
 
 async fn init_mqtt(client: &mut EspMqttClient<'_>) {
     loop {
+        let topic = MQTT_TOPIC_RECEIVE;
+        log::info!("Subscribing to topic: {:?}", topic);
         let res = client
             .subscribe(
-                "esp32-ble-proxy",
+                MQTT_TOPIC_RECEIVE,
                 esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
             )
             ;
@@ -216,9 +224,11 @@ async fn init_mqtt(client: &mut EspMqttClient<'_>) {
         break;
     }
     loop {
+        let topic = format!("{}/rpc", MQTT_TOPIC_SEND.lock().unwrap().clone());
+        log::info!("Subscribing to topic: {:?}", topic);
         let res = client
             .subscribe(
-                format!("esp32-ble-proxy/{}", UUID.lock().unwrap().to_string()).as_str(),
+                topic.as_str(),
                 esp_idf_svc::mqtt::client::QoS::ExactlyOnce,
             )
             ;
@@ -234,9 +244,10 @@ async fn init_mqtt(client: &mut EspMqttClient<'_>) {
         UUID.lock().unwrap().to_string()
     );
     loop {
+        log::info!("Sending register message to: {:?}", MQTT_TOPIC_SEND.lock().unwrap());
         let res = client
             .publish(
-                "esp32-ble-proxy",
+                MQTT_TOPIC_SEND.lock().unwrap().as_str(),
                 esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
                 false,
                 payload_register_message.as_bytes(),
