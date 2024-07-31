@@ -243,6 +243,12 @@ async fn bluetooth_start_scan(tx: Sender<Vec<u8>>) -> Result<Value, String> {
     });
     tokio::spawn(async move {
         info!("start scan");
+        let mut start_event: Event<String> = Event::default();
+        start_event.name = "ble_scan_started".to_string();
+        let res = tx.send(serde_json::to_string(&start_event).unwrap().into_bytes()).await;
+        if let Err(e) = res {
+            log::error!("failed to send event: {:?}", e);
+        }
         let result = ble_scan.start(10000).await;
         match result {
             Ok(_) => {
@@ -254,6 +260,12 @@ async fn bluetooth_start_scan(tx: Sender<Vec<u8>>) -> Result<Value, String> {
         }
         ble_scan.clear_results();
         listener.abort();
+        let mut finish_event: Event<String> = Event::default();
+        finish_event.name = "ble_scan_finished".to_string();
+        let res = tx.send(serde_json::to_string(&finish_event).unwrap().into_bytes()).await;
+        if let Err(e) = res {
+            log::error!("failed to send event: {:?}", e);
+        }
     });
 
     Ok(Value::String("OK".to_string()))
