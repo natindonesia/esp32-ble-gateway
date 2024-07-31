@@ -16,6 +16,7 @@ use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use esp_idf_sys::EspError;
 use lazy_static::lazy_static;
 use log::{error, info};
+use rpc::{Event, RpcResponse};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use uuid::Uuid;
@@ -239,10 +240,10 @@ async fn init_mqtt(client: &mut EspMqttClient<'_>) {
         }
         break;
     }
-    let payload_register_message = format!(
-        "{{\"type\":\"register\",\"uuid\":\"{}\"}}",
-        UUID.lock().unwrap().to_string()
-    );
+    let mut register_event: Event<String> = Event::default();
+    register_event.name = "register".to_string();
+    register_event.data = Some(UUID.lock().unwrap().to_string());
+    let payload_register_message = serde_json::to_string(&register_event).unwrap();
     loop {
         log::info!("Sending register message to: {:?}", MQTT_TOPIC_SEND.lock().unwrap());
         let res = client
@@ -261,6 +262,27 @@ async fn init_mqtt(client: &mut EspMqttClient<'_>) {
     }
 
     info!("Sent hello message");
+}
+
+async fn send_loop_mqtt(client: &mut EspMqttClient<'_>, mut rx: tokio::sync::mpsc::Receiver<Vec<u8>>) {
+    loop {
+        let data = rx.recv().await;
+        if data.is_none() {
+            log::error!("Failed to get data from channel");
+            continue;
+        }
+        let data = data.unwrap();
+        let res = client.publish(
+            MQTT_TOPIC_SEND.lock().unwrap().as_str(),
+            esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
+            false,
+            data.as_slice(),
+        );
+        if res.is_err() {
+            log::error!("Failed to send data: {:?}", res.err());
+            continue;
+        }
+    }
 }
 
 async fn mqtt_loop() -> Result<()> {
@@ -323,12 +345,40 @@ async fn mqtt_loop() -> Result<()> {
     });
 
     init_mqtt(&mut client).await;
+    let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
+    let _ = tokio::spawn(async move {
+        return send_loop_mqtt(&mut client, rx).await
+    }
+    );
+    let app_state = AppState {};
     loop {
-        let mut workload = workload.lock().unwrap();
+        let mut workload: std::sync::MutexGuard<Vec<Vec<u8>>> = workload.lock().unwrap();
         if workload.len() > 0 {
             let data = workload.remove(0);
-            let string = std::str::from_utf8(&data).unwrap();
+            let res = std::str::from_utf8(&data);
+            if res.is_err() {
+                log::error!("Failed to convert data to string: {:?}", res.err());
+                continue;
+            }
+            let string = res.unwrap();
             log::info!("Got data: {:?}", string);
+            let res = rpc::handle_rpc(&string, tx.clone(), &app_state).await;
+            if res.is_err() {
+                let error = res.err().unwrap();
+                log::error!("Failed to handle rpc: {:?}", error);
+                let mut error = RpcResponse::default();
+                error.error = Some(format!("{:?}", error));
+                let res = tx.send(serde_json::to_vec(&error).unwrap()).await;
+                if res.is_err() {
+                    log::error!("Failed to send error: {:?}", res.err());
+                }
+            }else if res.is_ok() {
+                let send_res = tx.send(res.unwrap().into_bytes()).await;
+                if send_res.is_err() {
+                    log::error!("Failed to send response: {:?}", send_res.err());
+                }
+                log::info!("Sent response: {:?}", string);
+            }
         }
         // check if thread died
         if thread_handle.is_finished() {

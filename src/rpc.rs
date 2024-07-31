@@ -18,18 +18,53 @@ pub struct RpcRequest {
     pub method: String,
     pub params: Map<String, serde_json::Value>,
 }
-
+const PACKET_TYPE_RESPONSE: &str = "response";
+const PACKET_TYPE_EVENT: &str = "event";
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RpcResponse {
     pub id: u64,
+    pub packet_type: String,
     pub error: Option<String>,
     pub result: Option<serde_json::Value>,
+}
+
+impl Default for RpcResponse {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            packet_type: PACKET_TYPE_RESPONSE.to_string(),
+            error: None,
+            result: None,
+        }
+    }
+    
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Event<T> {
     pub name: String,
+    pub packet_type: String,
     pub data: Option<T>,
+}
+
+impl Default for Event<Value> {
+    fn default() -> Self {
+        Self {
+            name: "".to_string(),
+            packet_type: PACKET_TYPE_EVENT.to_string(),
+            data: None,
+        }
+    }
+}
+
+impl Default for Event<String> {
+    fn default() -> Self {
+        Self {
+            name: "".to_string(),
+            packet_type: PACKET_TYPE_EVENT.to_string(),
+            data: None,
+        }
+    }
 }
 
 
@@ -133,6 +168,7 @@ async fn get_info() -> Result<Value, String> {
 async fn on_ble_scan_result(device: BLEAdvertisedDevice) -> Result<String, String> {
     let event = Event {
         name: "ble_scan_result".to_string(),
+        packet_type: PACKET_TYPE_EVENT.to_string(),
         data: Some(MyBLEAdvertisedDevice::from(device)),
     };
     let event_str_res = serde_json::to_string(&event);
@@ -143,7 +179,7 @@ async fn on_ble_scan_result(device: BLEAdvertisedDevice) -> Result<String, Strin
     return Ok(event_str);
 }
 
-async fn bluetooth_start_scan(tx: Arc<Sender<String>>) -> Result<Value, String> {
+async fn bluetooth_start_scan(tx: Sender<Vec<u8>>) -> Result<Value, String> {
     let ble_device = BLEDevice::take();
     let ble_scan = ble_device.get_scan();
 
@@ -160,9 +196,11 @@ async fn bluetooth_start_scan(tx: Arc<Sender<String>>) -> Result<Value, String> 
         });
 
 
+
+    let tx_clone = tx.clone();
     let listener = tokio::spawn(async move {
         let devices_queue = Arc::clone(&devices_queue2);
-
+        
         loop {
             tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
             if devices_queue.lock().unwrap().is_empty() {
@@ -173,7 +211,10 @@ async fn bluetooth_start_scan(tx: Arc<Sender<String>>) -> Result<Value, String> 
             let res = on_ble_scan_result(device).await;
             match res {
                 Ok(event_str) => {
-                    let res = tx.send(event_str).await;
+                    let cloned_str = event_str.clone();
+                    let bytes = cloned_str.into_bytes(); 
+                    
+                    let res = tx_clone.send(bytes).await; 
                     if let Err(e) = res {
                         log::error!("failed to send event: {:?}", e);
                         break;
@@ -183,9 +224,18 @@ async fn bluetooth_start_scan(tx: Arc<Sender<String>>) -> Result<Value, String> 
                     log::error!("failed to process scan result: {:?}", e);
                     let payload = serde_json::to_string(&Event {
                         name: "error".to_string(),
+                        packet_type: PACKET_TYPE_EVENT.to_string(),
                         data: Some(Value::String(e)),
                     });
-                    let res = tx.send(payload.unwrap()).await;
+                    if let Err(e) = payload {
+                        log::error!("failed to serialize error event: {:?}", e);
+                        break;
+                    }
+                    
+                    let res = tx_clone.send(payload.unwrap().into_bytes()).await;
+                    if let Err(e) = res {
+                        log::error!("failed to send error event: {:?}", e);
+                    }
                     break;
                 }
             }
@@ -218,7 +268,7 @@ macro_rules! read_param {
     };
 }
 
-async fn ble_find_client(addr: &str, app_state: AppState) -> Result<BLEClient, String> {
+async fn ble_find_client(addr: &str, app_state: &AppState) -> Result<BLEClient, String> {
 
 
     let ble_device = BLEDevice::take();
@@ -250,7 +300,7 @@ async fn ble_find_client(addr: &str, app_state: AppState) -> Result<BLEClient, S
 }
 
 
-async fn ble_read_characteristic(params: &Map<String, Value>, app_state: AppState) -> Result<Value, String> {
+async fn ble_read_characteristic(params: &Map<String, Value>, app_state: &AppState) -> Result<Value, String> {
     let address = read_param!(params, "address", String);
     let service_uuid = read_param!(params, "service_uuid", String);
     let characteristic_uuid = read_param!(params, "characteristic_uuid", String);
@@ -297,7 +347,7 @@ async fn ble_read_characteristic(params: &Map<String, Value>, app_state: AppStat
     Ok(Value::String(hex::encode(value)))
 }
 
-async fn ble_write_characteristic(params: &Map<String, Value>, app_state: AppState) -> Result<Value, String> {
+async fn ble_write_characteristic(params: &Map<String, Value>, app_state: &AppState) -> Result<Value, String> {
     let address = read_param!(params, "address", String);
     let service_uuid = read_param!(params, "service_uuid", String);
     let characteristic_uuid = read_param!(params, "characteristic_uuid", String);
@@ -344,7 +394,7 @@ async fn ble_write_characteristic(params: &Map<String, Value>, app_state: AppSta
     Ok(Value::String("OK".to_string()))
 }
 
-async fn ble_subscribe_characteristic(params: &Map<String, Value>, tx: Arc<Sender<String>>, app_state: AppState) -> Result<Value, String> {
+async fn ble_subscribe_characteristic(params: &Map<String, Value>, tx: Sender<Vec<u8>>, app_state: &AppState) -> Result<Value, String> {
     let address = read_param!(params, "address", String);
     let service_uuid = read_param!(params, "service_uuid", String);
     let characteristic_uuid = read_param!(params, "characteristic_uuid", String);
@@ -388,7 +438,6 @@ async fn ble_subscribe_characteristic(params: &Map<String, Value>, tx: Arc<Sende
     let characteristic_uuid = characteristic_uuid.to_string();
     let res = characteristic
         .on_notify(move |data| {
-            let tx_cloned = Arc::clone(&tx);
             let event = BLENotifyEvent {
                 address: address.clone(),
                 service_uuid: service_uuid.clone(),
@@ -397,6 +446,7 @@ async fn ble_subscribe_characteristic(params: &Map<String, Value>, tx: Arc<Sende
             };
             let event_str_res = serde_json::to_string(&Event {
                 name: "ble_notify".to_string(),
+                packet_type: PACKET_TYPE_EVENT.to_string(),
                 data: Some(event),
             });
             if let Err(e) = event_str_res {
@@ -404,7 +454,7 @@ async fn ble_subscribe_characteristic(params: &Map<String, Value>, tx: Arc<Sende
                 return;
             }
             let event_str = event_str_res.unwrap();
-            let res = tx_cloned.blocking_send(event_str);
+            let res = tx.blocking_send(event_str.into_bytes());
             if let Err(e) = res {
                 log::error!("failed to send event: {:?}", e);
             }
@@ -427,12 +477,13 @@ pub struct BLENotifyEvent {
 }
 
 
-pub async fn handle_rpc(payload: &str, tx: Arc<Sender<String>>, app_state: AppState) -> serde_json::Result<String> {
+pub async fn handle_rpc(payload: &str, tx: Sender<Vec<u8>>, app_state: &AppState) -> serde_json::Result<String> {
     let request_res: std::result::Result<RpcRequest, serde_json::Error> =
         serde_json::from_str(payload);
     if let Err(e) = request_res {
         let response = RpcResponse {
             id: 0,
+            packet_type: PACKET_TYPE_RESPONSE.to_string(),
             error: Some(format!("failed to parse request: {}", e)),
             result: None,
         };
@@ -455,11 +506,13 @@ pub async fn handle_rpc(payload: &str, tx: Arc<Sender<String>>, app_state: AppSt
     let response = match result {
         Ok(result) => RpcResponse {
             id: request.id,
+            packet_type: PACKET_TYPE_RESPONSE.to_string(),
             error: None,
             result: Some(result),
         },
         Err(e) => RpcResponse {
             id: request.id,
+            packet_type: PACKET_TYPE_RESPONSE.to_string(),
             error: Some(e),
             result: None,
         },
