@@ -274,7 +274,7 @@ async fn send_loop_mqtt(client: &mut EspMqttClient<'_>, mut rx: tokio::sync::mps
         let data = data.unwrap();
         let res = client.publish(
             MQTT_TOPIC_SEND.lock().unwrap().as_str(),
-            esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
+            esp_idf_svc::mqtt::client::QoS::ExactlyOnce,
             false,
             data.as_slice(),
         );
