@@ -166,7 +166,7 @@ async fn get_info() -> Result<Value, String> {
 
     map.insert("git_hash".to_string(), Value::String(GIT_HASH.to_string()));
     map.insert("git_commit_datetime".to_string(), Value::String(GIT_COMMIT_DATETIME.to_string()));
-
+    map.insert("uuid".to_string(), Value::String(crate::UUID.lock().unwrap().to_string()));
     Ok(Value::Object(map))
 }
 
