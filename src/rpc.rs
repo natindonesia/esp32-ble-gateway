@@ -143,6 +143,8 @@ async fn get_uuid() -> Result<Value, String> {
     let uuid = crate::UUID.lock().unwrap().clone();
     Ok(Value::String(uuid.to_string()))
 }
+const GIT_HASH : &str = env!("GIT_HASH");
+const GIT_COMMIT_DATETIME : &str = env!("GIT_COMMIT_DATETIME");
 
 async fn get_info() -> Result<Value, String> {
     let mut map = Map::new();
@@ -161,6 +163,9 @@ async fn get_info() -> Result<Value, String> {
         "esp_get_free_heap_size".to_string(),
         Value::Number(Number::from(esp_get_free_heap_size)),
     );
+
+    map.insert("git_hash".to_string(), Value::String(GIT_HASH.to_string()));
+    map.insert("git_commit_datetime".to_string(), Value::String(GIT_COMMIT_DATETIME.to_string()));
 
     Ok(Value::Object(map))
 }

@@ -39,9 +39,7 @@ pub struct Config {
     mqtt_endpoint: &'static str,
 }
 
-
 const MQTT_TOPIC_RECEIVE: &str = "esp32-ble-proxy/devices";
-
 
 pub struct AppState {}
 
@@ -211,12 +209,10 @@ async fn init_mqtt(client: &mut EspMqttClient<'_>) {
     loop {
         let topic = MQTT_TOPIC_RECEIVE;
         log::info!("Subscribing to topic: {:?}", topic);
-        let res = client
-            .subscribe(
-                MQTT_TOPIC_RECEIVE,
-                esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
-            )
-            ;
+        let res = client.subscribe(
+            MQTT_TOPIC_RECEIVE,
+            esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
+        );
         if res.is_err() {
             log::error!("Failed to subscribe to topic: {:?}", res.err());
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -227,12 +223,7 @@ async fn init_mqtt(client: &mut EspMqttClient<'_>) {
     loop {
         let topic = format!("{}/rpc", MQTT_TOPIC_SEND.lock().unwrap().clone());
         log::info!("Subscribing to topic: {:?}", topic);
-        let res = client
-            .subscribe(
-                topic.as_str(),
-                esp_idf_svc::mqtt::client::QoS::ExactlyOnce,
-            )
-            ;
+        let res = client.subscribe(topic.as_str(), esp_idf_svc::mqtt::client::QoS::ExactlyOnce);
         if res.is_err() {
             log::error!("Failed to subscribe to topic: {:?}", res.err());
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -245,15 +236,16 @@ async fn init_mqtt(client: &mut EspMqttClient<'_>) {
     register_event.data = Some(UUID.lock().unwrap().to_string());
     let payload_register_message = serde_json::to_string(&register_event).unwrap();
     loop {
-        log::info!("Sending register message to: {:?}", MQTT_TOPIC_SEND.lock().unwrap());
-        let res = client
-            .publish(
-                MQTT_TOPIC_SEND.lock().unwrap().as_str(),
-                esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
-                false,
-                payload_register_message.as_bytes(),
-            )
-            ;
+        log::info!(
+            "Sending register message to: {:?}",
+            MQTT_TOPIC_SEND.lock().unwrap()
+        );
+        let res = client.publish(
+            MQTT_TOPIC_SEND.lock().unwrap().as_str(),
+            esp_idf_svc::mqtt::client::QoS::AtLeastOnce,
+            false,
+            payload_register_message.as_bytes(),
+        );
         if res.is_err() {
             log::error!("Failed to send register message: {:?}", res.err());
             continue;
@@ -264,7 +256,10 @@ async fn init_mqtt(client: &mut EspMqttClient<'_>) {
     info!("Sent hello message");
 }
 
-async fn send_loop_mqtt(client: &mut EspMqttClient<'_>, mut rx: tokio::sync::mpsc::Receiver<Vec<u8>>) {
+async fn send_loop_mqtt(
+    client: &mut EspMqttClient<'_>,
+    mut rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
+) {
     loop {
         let data = rx.recv().await;
         if data.is_none() {
@@ -272,6 +267,17 @@ async fn send_loop_mqtt(client: &mut EspMqttClient<'_>, mut rx: tokio::sync::mps
             continue;
         }
         let data = data.unwrap();
+
+        // check if before connect
+        let res = std::str::from_utf8(&data);
+        if res.is_ok() {
+            let string = res.unwrap();
+            if string == "BeforeConnect" {
+                init_mqtt(client).await;
+                continue;
+            }
+        }
+
         let res = client.publish(
             MQTT_TOPIC_SEND.lock().unwrap().as_str(),
             esp_idf_svc::mqtt::client::QoS::ExactlyOnce,
@@ -307,7 +313,7 @@ async fn mqtt_loop() -> Result<()> {
     let workload_copy = workload.clone();
     let thread_handle = std::thread::spawn(move || {
         let mut connection = con;
-        loop{
+        loop {
             let event = connection.next();
             if event.is_err() {
                 log::error!("Failed to get event: {:?}", event.err());
@@ -315,7 +321,7 @@ async fn mqtt_loop() -> Result<()> {
             }
             let event = event.unwrap();
             let payload = event.payload();
-              match payload {
+            match payload {
                 EventPayload::Received {
                     id,
                     topic,
@@ -326,7 +332,7 @@ async fn mqtt_loop() -> Result<()> {
                     match details {
                         esp_idf_svc::mqtt::client::Details::Complete => {
                             // good
-                        },
+                        }
                         _ => {
                             log::error!("MQTT: {:?}", details);
                             continue;
@@ -334,22 +340,24 @@ async fn mqtt_loop() -> Result<()> {
                     }
                     workload_copy.lock().unwrap().push(data.to_vec());
                     log::info!("MQTT: {:?}", topic);
-                },
+                }
+                EventPayload::BeforeConnect => {
+                    workload_copy
+                        .lock()
+                        .unwrap()
+                        .push(b"BeforeConnect".to_vec());
+                }
                 _ => {
                     log::info!("MQTT: {:?}", payload);
                 }
-              }
+            }
         }
 
         error!("MQTT Connection closed");
     });
 
-    init_mqtt(&mut client).await;
     let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
-    let _ = tokio::spawn(async move {
-        return send_loop_mqtt(&mut client, rx).await
-    }
-    );
+    let _ = tokio::spawn(async move { return send_loop_mqtt(&mut client, rx).await });
     let app_state = AppState {};
     loop {
         let mut workload: std::sync::MutexGuard<Vec<Vec<u8>>> = workload.lock().unwrap();
@@ -362,6 +370,19 @@ async fn mqtt_loop() -> Result<()> {
             }
             let string = res.unwrap();
             log::info!("Got data: {:?}", string);
+
+            if string == "BeforeConnect" {
+                loop {
+                    let res = tx.send(b"BeforeConnect".to_vec()).await;
+                    if res.is_err() {
+                        log::error!("Failed to send BeforeConnect: {:?}", res.err());
+                        continue;
+                    }
+                    break;
+                }
+                continue;
+            }
+
             let res = rpc::handle_rpc(&string, tx.clone(), &app_state).await;
             if res.is_err() {
                 let error = res.err().unwrap();
@@ -372,7 +393,7 @@ async fn mqtt_loop() -> Result<()> {
                 if res.is_err() {
                     log::error!("Failed to send error: {:?}", res.err());
                 }
-            }else if res.is_ok() {
+            } else if res.is_ok() {
                 let send_res = tx.send(res.unwrap().into_bytes()).await;
                 if send_res.is_err() {
                     log::error!("Failed to send response: {:?}", send_res.err());
