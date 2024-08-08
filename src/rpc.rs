@@ -391,7 +391,7 @@ async fn ble_read_characteristic(params: &Map<String, Value>, app_state: &mut Ap
     if let Err(e) = client_res {
         return Err(format!("failed to find client: {:?}", e));
     }
-    let mut client: Arc<Mutex<BLEClient>> = client_res.unwrap();
+    let client: Arc<Mutex<BLEClient>> = client_res.unwrap();
 
     let res = client.lock();
     if let Err(e) = res {

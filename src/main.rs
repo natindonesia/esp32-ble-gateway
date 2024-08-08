@@ -8,17 +8,14 @@ use esp32_nimble::BLEClient;
 use esp_idf_hal::gpio::{Output, PinDriver};
 use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::mqtt::client::{
-    EspAsyncMqttClient, EspAsyncMqttConnection, EspMqttClient, EspMqttEvent, EventPayload,
+    EspMqttClient, EventPayload,
     MqttClientConfiguration,
 };
 use esp_idf_svc::nvs::EspNvs;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
-use esp_idf_sys::EspError;
 use lazy_static::lazy_static;
 use log::{error, info};
 use rpc::{Event, RpcResponse};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use uuid::Uuid;
 
 mod ntp;
@@ -327,7 +324,7 @@ async fn mqtt_loop() -> Result<()> {
             let payload = event.payload();
             match payload {
                 EventPayload::Received {
-                    id,
+                    
                     topic,
                     data,
                     details,
