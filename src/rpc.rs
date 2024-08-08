@@ -1,9 +1,8 @@
 use std::result::Result;
 use std::sync::{Arc, Mutex};
 
-use esp32_nimble::{BLEAdvertisedDevice, BLEClient, BLEDevice, BLERemoteService, uuid128};
+use esp32_nimble::{BLEAdvertisedDevice, BLEClient, BLEDevice};
 use esp32_nimble::utilities::BleUuid;
-use lazy_static::lazy_static;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
@@ -184,7 +183,16 @@ async fn on_ble_scan_result(device: BLEAdvertisedDevice) -> Result<String, Strin
     return Ok(event_str);
 }
 
-async fn bluetooth_start_scan(tx: Sender<Vec<u8>>) -> Result<Value, String> {
+async fn bluetooth_start_scan(tx: Sender<Vec<u8>>, app_state: &mut AppState) -> Result<Value, String> {
+    // Check if scan is already running
+    if app_state.ble_scan_running.lock().unwrap().clone() {
+        return Err("scan already running".to_string());
+    }
+
+    *app_state.ble_scan_running.lock().unwrap() = true;
+
+
+
     let ble_device = BLEDevice::take();
     let ble_scan = ble_device.get_scan();
 
@@ -246,6 +254,10 @@ async fn bluetooth_start_scan(tx: Sender<Vec<u8>>) -> Result<Value, String> {
             }
         }
     });
+
+
+    let is_ble_scan_running = app_state.ble_scan_running.clone();
+
     tokio::spawn(async move {
         info!("start scan");
         let mut start_event: Event<String> = Event::default();
@@ -271,6 +283,7 @@ async fn bluetooth_start_scan(tx: Sender<Vec<u8>>) -> Result<Value, String> {
         if let Err(e) = res {
             log::error!("failed to send event: {:?}", e);
         }
+        *is_ble_scan_running.lock().unwrap() = false;
     });
 
     Ok(Value::String("OK".to_string()))
@@ -285,8 +298,37 @@ macro_rules! read_param {
     };
 }
 
-async fn ble_find_client(addr: &str, app_state: &AppState) -> Result<BLEClient, String> {
-
+async fn ble_find_client(addr: &str, app_state: &mut AppState) -> Result<Arc<Mutex<BLEClient>>, String> {
+    // find already connected client on app state
+    for client_arc in app_state.ble_clients.clone().iter() {
+        let res = client_arc.lock();
+        if let Err(e) = res {
+            // clean up dead clients
+            app_state.ble_clients.retain(|client| {
+                let res = client.lock();
+                res.is_ok()
+            });
+            return Err(format!("failed to lock client: {:?}", e));
+        }
+        let mut client = res.unwrap();
+        let addr = addr.to_string();
+        
+        let res = client.desc();
+        if let Err(e) = res {
+            return Err(format!("failed to get client desc: {:?}", e));
+        }
+        let desc = res.unwrap();
+        if desc.address().to_string() == addr {
+            // connect this if found
+            if !client.connected() {
+                let res = client.connect(&desc.address()).await;
+                if let Err(e) = res {
+                    return Err(format!("failed to connect to device: {:?}", e));
+                }
+            }
+            return Ok(client_arc.clone());
+        }
+    }
 
     let ble_device = BLEDevice::take();
     let ble_scan = ble_device.get_scan();
@@ -309,15 +351,18 @@ async fn ble_find_client(addr: &str, app_state: &AppState) -> Result<BLEClient, 
     client.on_connect(|client| {
         client.update_conn_params(120, 120, 0, 60).unwrap();
     });
+    log::info!("connecting to device: {:?}", device.addr());
     let res = client.connect(device.addr()).await;
     if let Err(e) = res {
         return Err(format!("failed to connect to device: {:?}", e));
     }
-    Ok(client)
+    let arced = Arc::new(Mutex::new(client));
+    app_state.ble_clients.push(arced.clone());
+    Ok(arced)
 }
 
 
-async fn ble_read_characteristic(params: &Map<String, Value>, app_state: &AppState) -> Result<Value, String> {
+async fn ble_read_characteristic(params: &Map<String, Value>, app_state: &mut AppState) -> Result<Value, String> {
     let address = read_param!(params, "address", String);
     let service_uuid = read_param!(params, "service_uuid", String);
     let characteristic_uuid = read_param!(params, "characteristic_uuid", String);
@@ -342,7 +387,13 @@ async fn ble_read_characteristic(params: &Map<String, Value>, app_state: &AppSta
     if let Err(e) = client_res {
         return Err(format!("failed to find client: {:?}", e));
     }
-    let mut client = client_res.unwrap();
+    let mut client: Arc<Mutex<BLEClient>> = client_res.unwrap();
+
+    let res = client.lock();
+    if let Err(e) = res {
+        return Err(format!("failed to lock client: {:?}", e));
+    }
+    let mut client = res.unwrap();
 
 
     let service = client.get_service(service_uuid).await;
@@ -364,7 +415,7 @@ async fn ble_read_characteristic(params: &Map<String, Value>, app_state: &AppSta
     Ok(Value::String(hex::encode(value)))
 }
 
-async fn ble_write_characteristic(params: &Map<String, Value>, app_state: &AppState) -> Result<Value, String> {
+async fn ble_write_characteristic(params: &Map<String, Value>, app_state: &mut AppState) -> Result<Value, String> {
     let address = read_param!(params, "address", String);
     let service_uuid = read_param!(params, "service_uuid", String);
     let characteristic_uuid = read_param!(params, "characteristic_uuid", String);
@@ -386,7 +437,13 @@ async fn ble_write_characteristic(params: &Map<String, Value>, app_state: &AppSt
     if let Err(e) = client_res {
         return Err(format!("failed to find client: {:?}", e));
     }
-    let mut client = client_res.unwrap();
+    let client = client_res.unwrap();
+
+    let res = client.lock();
+    if let Err(e) = res {
+        return Err(format!("failed to lock client: {:?}", e));
+    }
+    let mut client = res.unwrap();
 
     let service = client.get_service(service_uuid).await;
     if let Err(e) = service {
@@ -411,7 +468,7 @@ async fn ble_write_characteristic(params: &Map<String, Value>, app_state: &AppSt
     Ok(Value::String("OK".to_string()))
 }
 
-async fn ble_subscribe_characteristic(params: &Map<String, Value>, tx: Sender<Vec<u8>>, app_state: &AppState) -> Result<Value, String> {
+async fn ble_subscribe_characteristic(params: &Map<String, Value>, tx: Sender<Vec<u8>>, app_state: &mut AppState) -> Result<Value, String> {
     let address = read_param!(params, "address", String);
     let service_uuid = read_param!(params, "service_uuid", String);
     let characteristic_uuid = read_param!(params, "characteristic_uuid", String);
@@ -432,7 +489,13 @@ async fn ble_subscribe_characteristic(params: &Map<String, Value>, tx: Sender<Ve
     if let Err(e) = client_res {
         return Err(format!("failed to find client: {:?}", e));
     }
-    let mut client = client_res.unwrap();
+    let client = client_res.unwrap();
+
+    let res = client.lock();
+    if let Err(e) = res {
+        return Err(format!("failed to lock client: {:?}", e));
+    }
+    let mut client = res.unwrap();
 
     let service = client.get_service(service_uuid).await;
     if let Err(e) = service {
@@ -494,7 +557,7 @@ pub struct BLENotifyEvent {
 }
 
 
-pub async fn handle_rpc(payload: &str, tx: Sender<Vec<u8>>, app_state: &AppState) -> serde_json::Result<String> {
+pub async fn handle_rpc(payload: &str, tx: Sender<Vec<u8>>, app_state: &mut AppState) -> serde_json::Result<String> {
     let request_res: std::result::Result<RpcRequest, serde_json::Error> =
         serde_json::from_str(payload);
     if let Err(e) = request_res {
@@ -512,7 +575,7 @@ pub async fn handle_rpc(payload: &str, tx: Sender<Vec<u8>>, app_state: &AppState
         "add" => add(&request.params).await,
         "sub" => sub(&request.params).await,
         "get_uuid" => get_uuid().await,
-        "bluetooth_start_scan" => bluetooth_start_scan(tx).await,
+        "bluetooth_start_scan" => bluetooth_start_scan(tx, app_state).await,
         "ble_read_characteristic" => ble_read_characteristic(&request.params, app_state).await,
         "ble_write_characteristic" => ble_write_characteristic(&request.params, app_state).await,
         "ble_subscribe_characteristic" => ble_subscribe_characteristic(&request.params, tx, app_state).await,

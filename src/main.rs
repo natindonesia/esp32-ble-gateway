@@ -41,7 +41,11 @@ pub struct Config {
 
 const MQTT_TOPIC_RECEIVE: &str = "esp32-ble-proxy/devices";
 
-pub struct AppState {}
+#[derive(Default)]
+pub struct AppState {
+    pub ble_clients: Vec<Arc<Mutex<BLEClient>>>,
+    pub ble_scan_running: Arc<Mutex<bool>>,
+}
 
 lazy_static! {
     static ref UUID: Mutex<Uuid> = Mutex::new(Uuid::nil());
@@ -358,7 +362,7 @@ async fn mqtt_loop() -> Result<()> {
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10);
     let _ = tokio::spawn(async move { return send_loop_mqtt(&mut client, rx).await });
-    let app_state = AppState {};
+    let mut app_state = AppState::default();
     loop {
         let mut workload: std::sync::MutexGuard<Vec<Vec<u8>>> = workload.lock().unwrap();
         if workload.len() > 0 {
@@ -383,7 +387,7 @@ async fn mqtt_loop() -> Result<()> {
                 continue;
             }
 
-            let res = rpc::handle_rpc(&string, tx.clone(), &app_state).await;
+            let res = rpc::handle_rpc(&string, tx.clone(), &mut app_state).await;
             if res.is_err() {
                 let error = res.err().unwrap();
                 log::error!("Failed to handle rpc: {:?}", error);
