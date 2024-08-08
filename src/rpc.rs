@@ -330,6 +330,10 @@ async fn ble_find_client(addr: &str, app_state: &mut AppState) -> Result<Arc<Mut
         }
     }
 
+    if app_state.ble_scan_running.lock().unwrap().clone() {
+        return Err("scan is running".to_string());
+    }
+
     let ble_device = BLEDevice::take();
     let ble_scan = ble_device.get_scan();
     let search_res = ble_scan
