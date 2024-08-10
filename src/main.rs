@@ -40,7 +40,7 @@ const MQTT_TOPIC_RECEIVE: &str = "esp32-ble-proxy/devices";
 
 #[derive(Default)]
 pub struct AppState {
-    pub ble_clients: Vec<Arc<Mutex<BLEClient>>>,
+    pub ble_clients: std::collections::HashMap<String, Arc<Mutex<BLEClient>>>,
     pub ble_scan_running: Arc<Mutex<bool>>,
 }
 

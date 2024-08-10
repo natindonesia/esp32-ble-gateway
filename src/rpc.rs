@@ -1,13 +1,14 @@
+use std::any::Any;
 use std::result::Result;
 use std::sync::{Arc, Mutex};
 
 use esp32_nimble::{BLEAdvertisedDevice, BLEClient, BLEDevice};
 use esp32_nimble::utilities::BleUuid;
-use log::{info, warn};
+use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 use serde_json::Map;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{self, Sender};
 
 use crate::AppState;
 
@@ -94,6 +95,22 @@ impl From<BLEAdvertisedDevice> for MyBLEAdvertisedDevice {
             Some(flag) => std::format!("{:?}", flag),
             None => "".to_string(),
         };
+        for uuid in device.get_service_uuids() {
+            info!("service uuid: {:?}", uuid);
+            // get type
+            match uuid {
+                BleUuid::Uuid16(uuid) => {
+                    info!("uuid16: 0x{:04x}", uuid);
+                }
+                BleUuid::Uuid32(uuid) => {
+                    info!("uuid32: 0x{:08x}", uuid);
+                }
+                BleUuid::Uuid128(uuid) => {
+                    info!("uuid128: {:?}", uuid);
+                }
+            }
+        }
+        
         Self {
             name: device.name().to_string(),
             address: device.addr().to_string(),
@@ -299,33 +316,30 @@ macro_rules! read_param {
 }
 
 async fn ble_find_client(addr: &str, app_state: &mut AppState) -> Result<Arc<Mutex<BLEClient>>, String> {
+    let ble_address_option = esp32_nimble::BLEAddress::from_str(addr, esp32_nimble::BLEAddressType::Public);
+    if let None = ble_address_option {
+        return Err("failed to parse address".to_string());
+    }
+    let ble_address = ble_address_option.unwrap();
     // find already connected client on app state
-    for client_arc in app_state.ble_clients.clone().iter() {
+    if app_state.ble_clients.contains_key(&addr.to_string()) {
+        let client_arc = app_state.ble_clients.get(&addr.to_string()).unwrap().clone();
         let res = client_arc.lock();
-        if let Err(e) = res {
-            // clean up dead clients
-            app_state.ble_clients.retain(|client| {
-                let res = client.lock();
-                res.is_ok()
-            });
-            return Err(format!("failed to lock client: {:?}", e));
-        }
+      
         let mut client = res.unwrap();
         let addr = addr.to_string();
         
-        let res = client.desc();
-        if let Err(e) = res {
-            return Err(format!("failed to get client desc: {:?}", e));
-        }
-        let desc = res.unwrap();
-        if desc.address().to_string() == addr {
-            // connect this if found
-            if !client.connected() {
-                let res = client.connect(&desc.address()).await;
-                if let Err(e) = res {
-                    return Err(format!("failed to connect to device: {:?}", e));
-                }
+        if !client.connected() {
+            // just connect?
+            let res = client.connect(&ble_address).await;
+            if let Err(e) = res {
+                log::error!("failed to connect to cached device: {:?}", e);
+                app_state.ble_clients.remove(&addr);
+            }else{
+                return Ok(client_arc.clone());
             }
+            
+        }else{
             return Ok(client_arc.clone());
         }
     }
@@ -335,16 +349,18 @@ async fn ble_find_client(addr: &str, app_state: &mut AppState) -> Result<Arc<Mut
     }
 
     let ble_device = BLEDevice::take();
+    log::info!("searching for device: {:?}", addr);
     let ble_scan = ble_device.get_scan();
     let search_res = ble_scan
         .active_scan(true)
         .interval(100)
         .window(99)
-        .find_device(5000, |device| device.addr().to_string() == addr)
+        .find_device(5000, |device| device.addr().to_string().to_ascii_uppercase() == addr.to_uppercase())
         .await;
     if let Err(e) = search_res {
         return Err(format!("failed to find device: {:?}", e));
     }
+
 
     let device = search_res.unwrap();
     if device.is_none() {
@@ -353,15 +369,33 @@ async fn ble_find_client(addr: &str, app_state: &mut AppState) -> Result<Arc<Mut
     let device = device.unwrap();
     let mut client = BLEClient::new();
     client.on_connect(|client| {
-        client.update_conn_params(120, 120, 0, 60).unwrap();
+        log::info!("connected to device: {:?}", client.desc());
     });
+
+    
+    client.on_disconnect(move |client| {
+        log::info!("disconnected from device: {:?}", client);
+    
+    });
+    
     log::info!("connecting to device: {:?}", device.addr());
-    let res = client.connect(device.addr()).await;
+    let res_async = client.connect(device.addr());
+    
+    // which one to finish first?
+    let res = tokio::time::timeout(tokio::time::Duration::from_secs(5), res_async).await;
+    if let Err(e) = res {
+        return Err(format!("failed to connect to device: timeout {:?}", e));
+    }
+    let res = res.unwrap();
     if let Err(e) = res {
         return Err(format!("failed to connect to device: {:?}", e));
     }
+    let res = client.update_conn_params(120, 120, 256, 10000/10);
+    if let Err(e) = res {
+        log::error!("failed to update connection params: {:?}", e);
+        }
     let arced = Arc::new(Mutex::new(client));
-    app_state.ble_clients.push(arced.clone());
+    app_state.ble_clients.insert(device.addr().to_string(), arced.clone());
     Ok(arced)
 }
 
